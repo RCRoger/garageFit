@@ -42,7 +42,10 @@ export const useSimulationStore = create<SimulationState>((set) => ({
   },
   placement: { x: 125, y: 250, angle: 0 },
   obstacles: [],
-  maneuverSettings: { corridorWidth: 350, approachLength: 600 },
+  maneuverSettings: {
+    corridorWidth: 350, approachLength: 600, arrivalSide: 'straight', startOffset: 0,
+    entryMode: 'nose-in', exitMode: 'tail-out', exitSide: 'same',
+  },
   maneuverResult: null,
   showGrid: true,
   showDimensions: true,

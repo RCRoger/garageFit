@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import {
   angleDifference,
   approachCorridor,
@@ -33,8 +33,10 @@ describe('modelo de maniobra', () => {
     const result = planManeuver(spot, vehicle, parked, [], settings);
     expect(result.status).toBe('viable');
     expect(result.entryPath.length).toBeGreaterThan(1);
-    expect(result.exitPath[0]).toEqual(result.entryPath[result.entryPath.length - 1]);
-    expect(result.exitPath[result.exitPath.length - 1]).toEqual(result.entryPath[0]);
+    expect(result.exitStatus).toBe('viable');
+    expect(result.exitMotion[0]!.pose).toEqual(parked);
+    expect(result.exitMotion.every((frame) => frame.direction === -1)).toBe(true);
+    expect(result.exitPath.at(-1)!.y).toBeGreaterThan(spot.length);
     expect(result.turningRadius).toBe(550);
   });
   it('refina la búsqueda para alcanzar una plaza ajustada y descentrada', () => {
@@ -57,7 +59,7 @@ describe('modelo de maniobra', () => {
     const end = result.entryPath.at(-1)!;
     expect(Math.hypot(end.x - target.x, end.y - target.y)).toBeLessThanOrEqual(5);
     expect(angleDifference(end.angle, target.angle)).toBeLessThanOrEqual(2);
-    expect(result.exitPath).toEqual([...result.entryPath].reverse());
+    expect(result.exitStatus).toBe('viable');
   });
   it('modela el giro progresivo de las ruedas y centra la dirección al aparcar', () => {
     const fiesta: VehicleDimensions = {
@@ -86,10 +88,7 @@ describe('modelo de maniobra', () => {
         );
       }
     }
-    expect(result.exitMotion).toEqual([...result.entryMotion].reverse().map((frame) => ({
-      ...frame,
-      direction: frame.direction === 1 ? -1 : 1,
-    })));
+    expect(result.exitStatus).toBe('viable');
   });
   it('pausa la reproducción al invertir el sentido sin desplazar el coche', () => {
     const timeline = createManeuverMotionTimeline([
@@ -128,7 +127,7 @@ describe('modelo de maniobra', () => {
     const end = result.entryPath.at(-1)!;
     expect(Math.hypot(end.x - parked.x, end.y - parked.y)).toBeLessThanOrEqual(5);
     expect(angleDifference(end.angle, parked.angle)).toBeLessThanOrEqual(2);
-    expect(result.exitPath).toEqual([...result.entryPath].reverse());
+    expect(result.exitStatus).toBe('viable');
   });
   it('interpola posición y el ángulo por el arco corto', () => {
     const path = [
@@ -174,5 +173,52 @@ describe('modelo de maniobra', () => {
   });
   it('normaliza diferencias angulares por el camino corto', () => {
     expect(angleDifference(179, -179)).toBeCloseTo(2);
+  });
+  describe('escenarios configurables', () => {
+    const street = { corridorWidth: 800, approachLength: 700 };
+    const wideStreet = { corridorWidth: 1000, approachLength: 700 };
+    it.each(['left', 'right'] as const)('llega desde el lado %s del pasillo transversal', (arrivalSide) => {
+      const result = planManeuver(spot, vehicle, parked, [], { ...street, arrivalSide });
+      const start = result.entryPath[0]!;
+
+      expect(result.status).toBe('viable');
+      expect(start.y).toBeCloseTo(spot.length + street.corridorWidth / 2);
+      expect(arrivalSide === 'left' ? start.x < 0 : start.x > spot.width).toBe(true);
+      expect(angleDifference(start.angle, arrivalSide === 'left' ? 90 : -90)).toBeLessThan(1e-6);
+      const end = result.entryPath.at(-1)!;
+      expect(angleDifference(end.angle, 0)).toBeLessThanOrEqual(2);
+    });
+    it('aparca de culo con el ángulo opuesto y marcha atrás final', () => {
+      const result = planManeuver(spot, vehicle, parked, [], { ...wideStreet, arrivalSide: 'left', entryMode: 'tail-in' }, 300000);
+      const end = result.entryPath.at(-1)!;
+
+      expect(result.status).toBe('viable');
+      expect(angleDifference(end.angle, 180)).toBeLessThanOrEqual(2);
+      expect(result.entryMotion.some((frame) => frame.direction === -1)).toBe(true);
+    });
+    it('sale de frente hacia el lado elegido, independiente de la entrada', () => {
+      const result = planManeuver(spot, vehicle, parked, [], {
+        ...wideStreet, arrivalSide: 'left', entryMode: 'tail-in', exitMode: 'nose-out', exitSide: 'right',
+      });
+      const end = result.exitPath.at(-1)!;
+
+      expect(result.exitStatus).toBe('viable');
+      expect(result.exitMotion[0]!.direction).toBe(1);
+      expect(end.x).toBeGreaterThan(spot.width);
+      expect(angleDifference(end.angle, 90)).toBeLessThanOrEqual(2);
+      expect(result.exitPath).not.toEqual([...result.entryPath].reverse());
+    });
+    it('informa que no hay salida de frente cuando el pasillo no permite girar', () => {
+      const result = planManeuver(spot, vehicle, parked, [], { ...settings, exitMode: 'nose-out' });
+
+      expect(result.status).toBe('viable');
+      expect(result.exitStatus).not.toBe('viable');
+      expect(result.exitPath).toEqual([]);
+      expect(result.exitReason).toContain('de frente');
+    });
+    it('desplaza lateralmente la posición inicial', () => {
+      const result = planManeuver(spot, vehicle, parked, [], { ...street, arrivalSide: 'right', startOffset: -40 });
+      expect(result.entryPath[0]!.y).toBeCloseTo(spot.length + street.corridorWidth / 2 - 40);
+    });
   });
 });

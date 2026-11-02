@@ -1,4 +1,4 @@
-import { polygonsIntersect } from '../collision/collision';
+﻿import { polygonsIntersect } from '../collision/collision';
 import { axisRect, orientedRect, type Polygon } from '../geometry/polygon';
 import { degToRad, length, sub, vec } from '../geometry/vec';
 import { obstaclePolygon, vehicleWidthForClearance } from '../collision/analysis';
@@ -7,12 +7,14 @@ import type { Obstacle, ParkingSpot, Placement, VehicleDimensions } from '@/type
 export type ManeuverStatus = 'viable' | 'not-viable' | 'not-verified';
 
 export interface ManeuverResult {
+  /** Estado de la entrada. La salida tiene su propio estado en `exitStatus`. */
   status: ManeuverStatus;
   entryPath: Placement[];
-  /** Exact reverse of the entry route in the reversible, static-obstacle model. */
   exitPath: Placement[];
   entryMotion: ManeuverMotionFrame[];
   exitMotion: ManeuverMotionFrame[];
+  exitStatus: ManeuverStatus;
+  exitReason: string;
   expandedNodes: number;
   reason: string;
   turningRadius: number | null;
@@ -42,6 +44,22 @@ export interface ManeuverMotionSample {
 export interface ManeuverSettings {
   corridorWidth: number;
   approachLength: number;
+  arrivalSide?: 'straight' | 'left' | 'right';
+  startOffset?: number;
+  entryMode?: 'nose-in' | 'tail-in';
+  exitMode?: 'nose-out' | 'tail-out';
+  exitSide?: 'same' | 'left' | 'right';
+}
+
+export interface Rect { minX: number; minY: number; maxX: number; maxY: number }
+
+interface SearchGoal {
+  pose: Placement;
+  reached: (pose: Placement, steeringIndex: number, resolution: SearchResolution) => boolean;
+  /** Extra lower-bound hint combined with the default heuristic. */
+  estimate?: (pose: Placement) => number;
+  /** Greedy weight applied to the heuristic; larger values trade optimality for speed. */
+  weight?: number;
 }
 
 interface Node {
@@ -123,18 +141,66 @@ export function angleDifference(a: number, b: number): number {
   return Math.abs(normalizeAngle(a - b));
 }
 
-export function approachCorridor(spot: ParkingSpot, entrance: ParkingSpot['entrance'], settings: ManeuverSettings) {
-  const { corridorWidth, approachLength } = settings;
-  switch (entrance) {
-    case 'bottom':
-      return axisRect((spot.width - corridorWidth) / 2, spot.length, corridorWidth, approachLength);
-    case 'top':
-      return axisRect((spot.width - corridorWidth) / 2, -approachLength, corridorWidth, approachLength);
-    case 'left':
-      return axisRect(-approachLength, (spot.length - corridorWidth) / 2, approachLength, corridorWidth);
-    case 'right':
-      return axisRect(spot.width, (spot.length - corridorWidth) / 2, approachLength, corridorWidth);
+export interface EntranceFrame {
+  angle: number;
+  /** Eje del pasillo: lado derecho del coche al entrar. */
+  r: { x: number; y: number };
+  /** Normal que sale de la plaza. */
+  n: { x: number; y: number };
+  /** Centro del borde de entrada. */
+  c: { x: number; y: number };
+  halfEdge: number;
+}
+
+const ENTRANCE_ANGLE: Record<ParkingSpot['entrance'], number> = { bottom: 0, top: 180, left: 90, right: -90 };
+
+export function entranceFrame(spot: ParkingSpot, entrance: ParkingSpot['entrance'] = spot.entrance): EntranceFrame {
+  const angle = ENTRANCE_ANGLE[entrance];
+  const radians = degToRad(angle);
+  const r = { x: Math.round(Math.cos(radians)), y: Math.round(Math.sin(radians)) };
+  const n = { x: Math.round(-Math.sin(radians)), y: Math.round(Math.cos(radians)) };
+  const horizontalEdge = entrance === 'top' || entrance === 'bottom';
+  const halfEdge = (horizontalEdge ? spot.width : spot.length) / 2;
+  const halfDepth = (horizontalEdge ? spot.length : spot.width) / 2;
+  return {
+    angle,
+    r,
+    n,
+    c: { x: spot.width / 2 + n.x * halfDepth, y: spot.length / 2 + n.y * halfDepth },
+    halfEdge,
+  };
+}
+
+export function localRect(f: EntranceFrame, sMin: number, sMax: number, dMin: number, dMax: number): Rect {
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (const s of [sMin, sMax]) {
+    for (const d of [dMin, dMax]) {
+      xs.push(f.c.x + f.r.x * s + f.n.x * d);
+      ys.push(f.c.y + f.r.y * s + f.n.y * d);
+    }
   }
+  return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+}
+
+function domainRects(spot: ParkingSpot, settings: ManeuverSettings, entrance: ParkingSpot['entrance'] = spot.entrance): Rect[] {
+  const f = entranceFrame(spot, entrance);
+  const { corridorWidth, approachLength } = settings;
+  if ((settings.arrivalSide ?? 'straight') === 'straight') {
+    return [localRect(f, -corridorWidth / 2, corridorWidth / 2, 0, approachLength)];
+  }
+  const half = f.halfEdge + approachLength;
+  return [localRect(f, -half, half, 0, corridorWidth)];
+}
+
+export function approachCorridor(spot: ParkingSpot, entrance: ParkingSpot['entrance'], settings: ManeuverSettings) {
+  const [rect] = domainRects(spot, settings, entrance);
+  return axisRect(rect!.minX, rect!.minY, rect!.maxX - rect!.minX, rect!.maxY - rect!.minY);
+}
+
+/** Ángulo que debe tener el vehículo aparcado según se entre de frente o de culo. */
+export function parkedAngle(spot: ParkingSpot, entryMode: 'nose-in' | 'tail-in' = 'nose-in'): number {
+  return normalizeAngle(ENTRANCE_ANGLE[spot.entrance] + (entryMode === 'tail-in' ? 180 : 0));
 }
 
 function pointInRect(x: number, y: number, rect: { minX: number; minY: number; maxX: number; maxY: number }): boolean {
@@ -144,10 +210,10 @@ function pointInRect(x: number, y: number, rect: { minX: number; minY: number; m
 function pointOnPathInsideDomain(
   point: { x: number; y: number },
   spot: ParkingSpot,
-  corridorBounds: { minX: number; minY: number; maxX: number; maxY: number },
+  corridorBounds: readonly Rect[],
 ): boolean {
   const inSpot = pointInRect(point.x, point.y, { minX: 0, minY: 0, maxX: spot.width, maxY: spot.length });
-  return inSpot || pointInRect(point.x, point.y, corridorBounds);
+  return inSpot || corridorBounds.some((rect) => pointInRect(point.x, point.y, rect));
 }
 
 function footprint(v: VehicleDimensions, pose: Placement): Polygon {
@@ -157,7 +223,7 @@ function footprint(v: VehicleDimensions, pose: Placement): Polygon {
 function poseAllowed(
   pose: Placement,
   spot: ParkingSpot,
-  corridorBounds: { minX: number; minY: number; maxX: number; maxY: number },
+  corridorBounds: readonly Rect[],
   vehicle: VehicleDimensions,
   obstacles: readonly Polygon[],
 ): boolean {
@@ -239,31 +305,92 @@ function heuristic(
   return Math.max(distance, turning, steering);
 }
 
-function reachedGoal(
-  pose: Placement,
-  target: Placement,
-  resolution: SearchResolution,
-  steeringIndex: number,
-): boolean {
-  return Math.hypot(pose.x - target.x, pose.y - target.y) <= resolution.goalPositionToleranceCm &&
-    angleDifference(pose.angle, target.angle) <= resolution.goalAngleToleranceDeg &&
-    steeringIndex === 0;
+function startPose(
+  spot: ParkingSpot,
+  settings: ManeuverSettings,
+  approachLength: number,
+  vehicleLength: number,
+): Placement {
+  const f = entranceFrame(spot);
+  const side = settings.arrivalSide ?? 'straight';
+  const offset = settings.startOffset ?? 0;
+  if (side === 'straight') {
+    const d = approachLength - vehicleLength / 2;
+    return {
+      x: f.c.x + f.r.x * offset + f.n.x * d,
+      y: f.c.y + f.r.y * offset + f.n.y * d,
+      angle: f.angle,
+    };
+  }
+  const s = (side === 'left' ? -1 : 1) * (f.halfEdge + approachLength - vehicleLength / 2);
+  const d = settings.corridorWidth / 2 + offset;
+  return {
+    x: f.c.x + f.r.x * s + f.n.x * d,
+    y: f.c.y + f.r.y * s + f.n.y * d,
+    angle: normalizeAngle(f.angle + (side === 'left' ? 90 : -90)),
+  };
 }
 
-function startPose(spot: ParkingSpot, entrance: ParkingSpot['entrance'], approachLength: number, vehicleLength: number): Placement {
-  switch (entrance) {
-    case 'bottom': return { x: spot.width / 2, y: spot.length + approachLength - vehicleLength / 2, angle: 0 };
-    case 'top': return { x: spot.width / 2, y: -approachLength + vehicleLength / 2, angle: 180 };
-    case 'left': return { x: -approachLength + vehicleLength / 2, y: spot.length / 2, angle: 90 };
-    case 'right': return { x: spot.width + approachLength - vehicleLength / 2, y: spot.length / 2, angle: -90 };
+function entryGoal(target: Placement, weight = 1): SearchGoal {
+  return {
+    pose: target,
+    weight,
+    reached: (pose, steeringIndex, resolution) =>
+      Math.hypot(pose.x - target.x, pose.y - target.y) <= resolution.goalPositionToleranceCm &&
+      angleDifference(pose.angle, target.angle) <= resolution.goalAngleToleranceDeg &&
+      steeringIndex === 0,
+  };
+}
+
+function exitGoal(
+  spot: ParkingSpot,
+  settings: ManeuverSettings,
+  vehicleLength: number,
+  exitMode: 'nose-out' | 'tail-out',
+): SearchGoal {
+  const f = entranceFrame(spot);
+  const arrival = settings.arrivalSide ?? 'straight';
+  const project = (pose: Placement) => ({
+    s: (pose.x - f.c.x) * f.r.x + (pose.y - f.c.y) * f.r.y,
+    d: (pose.x - f.c.x) * f.n.x + (pose.y - f.c.y) * f.n.y,
+  });
+  if (arrival === 'straight') {
+    // In a straight lane, backing out leaves the car facing inward and driving out leaves it facing outward.
+    const dGoal = Math.min(vehicleLength / 2 + 20, settings.approachLength - vehicleLength / 2);
+    const heading = exitMode === 'nose-out' ? normalizeAngle(f.angle + 180) : f.angle;
+    return {
+      pose: { x: f.c.x + f.n.x * dGoal, y: f.c.y + f.n.y * dGoal, angle: heading },
+      reached: (pose, steeringIndex, resolution) =>
+        steeringIndex === 0 &&
+        project(pose).d >= dGoal - resolution.goalPositionToleranceCm &&
+        angleDifference(pose.angle, heading) <= resolution.goalAngleToleranceDeg,
+    };
   }
+  const requested = settings.exitSide ?? 'same';
+  const side = requested === 'same' ? arrival : requested;
+  const sign = side === 'left' ? -1 : 1;
+  const sGoal = sign * Math.min(f.halfEdge + vehicleLength / 2, f.halfEdge + settings.approachLength - vehicleLength / 2);
+  const dGoal = settings.corridorWidth / 2;
+  const heading = normalizeAngle(f.angle + sign * 90);
+  return {
+    weight: 4,
+    pose: {
+      x: f.c.x + f.r.x * sGoal + f.n.x * dGoal,
+      y: f.c.y + f.r.y * sGoal + f.n.y * dGoal,
+      angle: heading,
+    },
+    reached: (pose, steeringIndex, resolution) =>
+      steeringIndex === 0 &&
+      sign * (project(pose).s - sGoal) >= -resolution.goalPositionToleranceCm &&
+      angleDifference(pose.angle, heading) <= resolution.goalAngleToleranceDeg,
+  };
 }
 
 function straightSegment(
   from: Placement,
   to: Placement,
   spot: ParkingSpot,
-  corridorBounds: { minX: number; minY: number; maxX: number; maxY: number },
+  corridorBounds: readonly Rect[],
   vehicle: VehicleDimensions,
   obstacles: readonly Polygon[],
 ): ManeuverMotionFrame[] | null {
@@ -313,34 +440,97 @@ function result(
   turningRadius: number | null,
   expandedNodes = 0,
   entryMotion: ManeuverMotionFrame[] = [],
+  exit: { status: ManeuverStatus; reason: string; motion: ManeuverMotionFrame[] } = {
+    status: 'not-verified',
+    reason: 'La salida no se ha calculado.',
+    motion: [],
+  },
 ): ManeuverResult {
-  const usableMotion = status === 'viable' ? entryMotion : [];
-  const exitMotion = usableMotion.slice().reverse().map((frame) => ({
-    ...frame,
-    direction: frame.direction === 1 ? -1 as const : 1 as const,
-  }));
-  const entryPath = usableMotion.map((frame) => frame.pose);
+  const usableEntry = status === 'viable' ? entryMotion : [];
+  const usableExit = exit.status === 'viable' ? exit.motion : [];
   return {
     status,
     reason,
     turningRadius,
     expandedNodes,
-    entryPath,
-    exitPath: exitMotion.map((frame) => frame.pose),
-    entryMotion: usableMotion,
-    exitMotion,
+    entryPath: usableEntry.map((frame) => frame.pose),
+    exitPath: usableExit.map((frame) => frame.pose),
+    entryMotion: usableEntry,
+    exitMotion: usableExit,
+    exitStatus: exit.status,
+    exitReason: exit.reason,
   };
 }
 
+interface PlanContext {
+  spot: ParkingSpot;
+  domain: readonly Rect[];
+  vehicle: VehicleDimensions;
+  obstacles: readonly Polygon[];
+  turningRadius: number;
+  maxSteeringAngle: number;
+}
+
+/** Coarse pass followed by a finer retry; coarse hits are not trusted on their own. */
+function searchWithRefinement(
+  context: PlanContext,
+  start: Placement,
+  goal: SearchGoal,
+  initialDirection: -1 | 1,
+  maxExpanded: number,
+): ManeuverResult {
+  let expandedNodes = 0;
+  for (const [resolutionIndex, resolution] of SEARCH_RESOLUTIONS.entries()) {
+    const remaining = maxExpanded - expandedNodes;
+    if (remaining <= 0) break;
+    const stageBudget = resolutionIndex === 0
+      ? Math.min(remaining, Math.max(1, Math.floor(maxExpanded / 4)))
+      : remaining;
+    const searchResult = searchManeuver(
+      start,
+      goal,
+      context.spot,
+      context.domain,
+      context.vehicle,
+      context.obstacles,
+      context.turningRadius,
+      context.maxSteeringAngle,
+      resolution,
+      stageBudget,
+      expandedNodes,
+      initialDirection,
+    );
+    expandedNodes = searchResult.expandedNodes;
+    if (searchResult.status === 'viable') {
+      if (resolutionIndex === 0) continue;
+      return { ...searchResult, reason: `${searchResult.reason} Se encontró al refinar la resolución de búsqueda.` };
+    }
+  }
+  if (expandedNodes >= maxExpanded) {
+    return result(
+      'not-verified',
+      `Límite de búsqueda alcanzado (${maxExpanded} estados); no se puede concluir que sea inaccesible.`,
+      context.turningRadius,
+      expandedNodes,
+    );
+  }
+  return result(
+    'not-viable',
+    `No se encontró una trayectoria tras agotar la búsqueda gruesa y refinada (${SEARCH_RESOLUTIONS[1].stepCm} cm, ${SEARCH_RESOLUTIONS[1].positionBinCm} cm/${SEARCH_RESOLUTIONS[1].angleBinDeg}°).`,
+    context.turningRadius,
+    expandedNodes,
+  );
+}
+
 /**
- * Bounded Hybrid-A* search with a coarse pass and a finer retry for missed routes.
- * The reversible, static-obstacle assumption makes the exit path the exact reverse of entry.
+ * Bounded Hybrid-A* search (coarse pass plus finer retry) for entry and, separately, for exit.
+ * Entry and exit have independent gear constraints, so the exit is not the reverse of the entry.
  * Search exhaustion is reported as not-verified when the expansion cap is reached.
  */
 export function planManeuver(
   spot: ParkingSpot,
   vehicle: VehicleDimensions,
-  target: Placement,
+  placement: Placement,
   obstacles: readonly Obstacle[],
   settings: ManeuverSettings,
   maxExpanded = 100000,
@@ -349,15 +539,16 @@ export function planManeuver(
     return result('not-verified', 'Introduce el diámetro de giro para usar el modelo bicicleta.', null);
   }
   const turningRadius = vehicle.turningDiameter / 2;
-  const corridor = approachCorridor(spot, spot.entrance, settings);
-  const corridorBounds = {
-    minX: Math.min(...corridor.map((p) => p.x)),
-    minY: Math.min(...corridor.map((p) => p.y)),
-    maxX: Math.max(...corridor.map((p) => p.x)),
-    maxY: Math.max(...corridor.map((p) => p.y)),
-  };
+  const entryMode = settings.entryMode ?? 'nose-in';
+  const exitMode = settings.exitMode ?? (entryMode === 'tail-in' ? 'nose-out' : 'tail-out');
+  const target: Placement = { x: placement.x, y: placement.y, angle: parkedAngle(spot, entryMode) };
+  const corridorBounds = domainRects(spot, settings);
   const obstaclePolygons = obstacles.map(obstaclePolygon);
-  const actualStart = startPose(spot, spot.entrance, settings.approachLength, vehicle.length);
+  const actualStart = startPose(spot, settings, settings.approachLength, vehicle.length);
+  const maxSteeringAngle = Math.atan(vehicle.wheelbase / turningRadius);
+  const context: PlanContext = {
+    spot, domain: corridorBounds, vehicle, obstacles: obstaclePolygons, turningRadius, maxSteeringAngle,
+  };
 
   if (!poseAllowed(actualStart, spot, corridorBounds, vehicle, obstaclePolygons)) {
     return result('not-viable', 'El vehículo no cabe en la zona de aproximación configurada.', turningRadius);
@@ -366,9 +557,51 @@ export function planManeuver(
     return result('not-viable', 'La posición final del vehículo colisiona o sale del área modelada.', turningRadius);
   }
 
+  const entry = planEntry(context, settings, actualStart, target, maxExpanded);
+
+  const exitStart = target;
+  const exitInitialDirection = exitMode === 'tail-out' ? -1 : 1;
+  const exitSearch = searchWithRefinement(
+    context,
+    exitStart,
+    exitGoal(spot, settings, vehicle.length, exitMode),
+    exitInitialDirection,
+    maxExpanded,
+  );
+  const exitLabel = exitMode === 'tail-out' ? 'de culo' : 'de frente';
+  const exit = {
+    status: exitSearch.status,
+    motion: exitSearch.entryMotion,
+    reason: exitSearch.status === 'viable'
+      ? `Se encontró una salida ${exitLabel}.`
+      : exitSearch.status === 'not-viable'
+        ? `No hay salida ${exitLabel} en el modelo configurado (el pasillo, los obstáculos o el radio de giro lo impiden).`
+        : `Salida ${exitLabel} no verificada: ${exitSearch.reason}`,
+  };
+  return result(
+    entry.status,
+    entry.reason,
+    turningRadius,
+    entry.expandedNodes + exitSearch.expandedNodes,
+    entry.entryMotion,
+    exit,
+  );
+}
+
+function planEntry(
+  context: PlanContext,
+  settings: ManeuverSettings,
+  actualStart: Placement,
+  target: Placement,
+  maxExpanded: number,
+): ManeuverResult {
+  const { spot, vehicle, turningRadius } = context;
+  const corridorBounds = context.domain;
+  const obstaclePolygons = context.obstacles;
+
   // Long empty approaches add many equivalent straight-ahead states without helping the turn search.
   const planningApproachLength = Math.min(settings.approachLength, Math.max(vehicle.length, turningRadius * 2));
-  const planningStart = startPose(spot, spot.entrance, planningApproachLength, vehicle.length);
+  const planningStart = startPose(spot, settings, planningApproachLength, vehicle.length);
   const approachPrefix = straightSegment(
     actualStart,
     planningStart,
@@ -380,7 +613,7 @@ export function planManeuver(
   const start = approachPrefix ? planningStart : actualStart;
   const prefix = approachPrefix ?? [{ pose: actualStart, direction: 1 as const, steeringAngle: 0 }];
 
-  if (alignedForStraightTravel(start, target)) {
+  if ((settings.entryMode ?? 'nose-in') === 'nose-in' && alignedForStraightTravel(start, target)) {
     const straightPath = straightSegment(start, target, spot, corridorBounds, vehicle, obstaclePolygons);
     if (straightPath) {
       return result(
@@ -393,71 +626,73 @@ export function planManeuver(
     }
   }
 
-  const maxSteeringAngle = Math.atan(vehicle.wheelbase / turningRadius);
-  let expandedNodes = 0;
-
-  for (const [resolutionIndex, resolution] of SEARCH_RESOLUTIONS.entries()) {
-    const remaining = maxExpanded - expandedNodes;
-    if (remaining <= 0) break;
-    const stageBudget = resolutionIndex === 0
-      ? Math.min(remaining, Math.max(1, Math.floor(maxExpanded / 4)))
-      : remaining;
-    const searchResult = searchManeuver(
-      start,
-      target,
-      spot,
-      corridorBounds,
-      vehicle,
-      obstaclePolygons,
-      turningRadius,
-      maxSteeringAngle,
-      resolution,
-      stageBudget,
-      expandedNodes,
-    );
-    expandedNodes = searchResult.expandedNodes;
-    if (searchResult.status === 'viable') {
-      if (resolutionIndex === 0) continue;
-      const entryMotion = [...prefix.slice(0, -1), ...searchResult.entryMotion];
-      const exitMotion = entryMotion.slice().reverse().map((frame) => ({
-        ...frame,
-        direction: frame.direction === 1 ? -1 as const : 1 as const,
-      }));
-      const completeResult = {
-        ...searchResult,
-        entryMotion,
-        exitMotion,
-        entryPath: entryMotion.map((frame) => frame.pose),
-        exitPath: exitMotion.map((frame) => frame.pose),
-      };
-      return resolutionIndex > 0
-        ? { ...completeResult, reason: `${completeResult.reason} Se encontró al refinar la resolución de búsqueda.` }
-        : completeResult;
+  const lateral = (settings.arrivalSide ?? 'straight') !== 'straight';
+  if (settings.entryMode === 'tail-in' && lateral) {
+    // Pass the spot, stop, then back in with the tail swinging into the bay.
+    const f = entranceFrame(spot);
+    const dStart = (start.x - f.c.x) * f.n.x + (start.y - f.c.y) * f.n.y;
+    const sign = settings.arrivalSide === 'left' ? 1 : -1;
+    const passS = sign * Math.min(turningRadius, f.halfEdge + settings.approachLength - vehicle.length / 2);
+    const pass: Placement = {
+      x: f.c.x + f.r.x * passS + f.n.x * dStart,
+      y: f.c.y + f.r.y * passS + f.n.y * dStart,
+      angle: start.angle,
+    };
+    const drive = straightSegment(start, pass, spot, corridorBounds, vehicle, obstaclePolygons);
+    if (!drive) {
+      return result('not-viable', 'No hay espacio para pasar la plaza antes de dar marcha atrás.', turningRadius);
     }
-  }
-
-  if (expandedNodes >= maxExpanded) {
+    const back = searchWithRefinement(context, pass, entryGoal(target, 4), -1, maxExpanded);
+    if (back.status !== 'viable') return back;
     return result(
-      'not-verified',
-      `Límite de búsqueda alcanzado (${maxExpanded} estados); no se puede concluir que sea inaccesible.`,
+      'viable',
+      back.reason,
       turningRadius,
-      expandedNodes,
+      back.expandedNodes,
+      [...prefix.slice(0, -1), ...drive.slice(0, -1), ...back.entryMotion],
     );
   }
-
+  if (settings.entryMode === 'tail-in') {
+    // Reversing in is planned in two legs: first face the car outward at the spot mouth, then back straight in.
+    const f = entranceFrame(spot);
+    const dMouth = Math.max(0, Math.min(
+      lateral ? Math.max(vehicle.length / 2 + 20, settings.corridorWidth / 2) : vehicle.length / 2 + 20,
+      settings.corridorWidth - vehicle.length / 2,
+    ));
+    const mouth: Placement = {
+      x: f.c.x + f.n.x * dMouth,
+      y: f.c.y + f.n.y * dMouth,
+      angle: target.angle,
+    };
+    const legA = searchWithRefinement(context, start, entryGoal(mouth, 4), 1, Math.floor(maxExpanded / 2));
+    if (legA.status !== 'viable') return legA;
+    const mouthPose = legA.entryMotion.at(-1)!.pose;
+    const legB = searchWithRefinement(context, mouthPose, entryGoal(target), -1, Math.floor(maxExpanded / 2));
+    if (legB.status !== 'viable') return legB;
+    return result(
+      'viable',
+      legB.reason,
+      turningRadius,
+      legA.expandedNodes + legB.expandedNodes,
+      [...prefix.slice(0, -1), ...legA.entryMotion, ...legB.entryMotion.slice(1)],
+    );
+  }
+  const found = searchWithRefinement(context, start, entryGoal(target, lateral ? 4 : 1), 1, maxExpanded);
+  if (found.status !== 'viable') return found;
   return result(
-    'not-viable',
-    `No se encontró una trayectoria tras agotar la búsqueda gruesa y refinada (${SEARCH_RESOLUTIONS[1].stepCm} cm, ${SEARCH_RESOLUTIONS[1].positionBinCm} cm/${SEARCH_RESOLUTIONS[1].angleBinDeg}°).`,
+    'viable',
+    found.reason,
     turningRadius,
-    expandedNodes,
+    found.expandedNodes,
+    [...prefix.slice(0, -1), ...found.entryMotion],
   );
 }
 
 function searchManeuver(
   start: Placement,
-  target: Placement,
+  goal: SearchGoal,
   spot: ParkingSpot,
-  corridorBounds: { minX: number; minY: number; maxX: number; maxY: number },
+  corridorBounds: readonly Rect[],
   vehicle: VehicleDimensions,
   obstaclePolygons: readonly Polygon[],
   turningRadius: number,
@@ -465,11 +700,19 @@ function searchManeuver(
   resolution: SearchResolution,
   maxExpanded: number,
   expandedOffset: number,
+  initialDirection: -1 | 1,
 ): ManeuverResult {
-  const nodes: Node[] = [{ pose: start, cost: 0, parent: -1, direction: 1, steeringIndex: 0 }];
+  const target = goal.pose;
+  const weight = goal.weight ?? 1;
+  const estimateFor = (pose: Placement, steeringIndex: number) =>
+    weight * Math.max(
+      heuristic(pose, target, turningRadius, steeringIndex, resolution.stepCm),
+      goal.estimate?.(pose) ?? 0,
+    );
+  const nodes: Node[] = [{ pose: start, cost: 0, parent: -1, direction: initialDirection, steeringIndex: 0 }];
   const open = new MinHeap();
-  open.push({ index: 0, priority: heuristic(start, target, turningRadius, 0, resolution.stepCm) });
-  const bestCost = new Map<string, number>([[poseKey(start, resolution, 1, 0), 0]]);
+  open.push({ index: 0, priority: estimateFor(start, 0) });
+  const bestCost = new Map<string, number>([[poseKey(start, resolution, initialDirection, 0), 0]]);
   const closed = new Set<string>();
   let expanded = 0;
 
@@ -478,11 +721,11 @@ function searchManeuver(
     const current = nodes[item.index]!;
     const key = poseKey(current.pose, resolution, current.direction, current.steeringIndex);
     if (closed.has(key)) continue;
-    if (reachedGoal(current.pose, target, resolution, current.steeringIndex)) {
+    if (goal.reached(current.pose, current.steeringIndex, resolution)) {
       const entryMotion = pathTo(nodes, item.index, maxSteeringAngle);
       return result(
         'viable',
-        `Se encontró una trayectoria de entrada con tolerancia final de ${resolution.goalPositionToleranceCm} cm y ${resolution.goalAngleToleranceDeg}°; la salida es su recorrido inverso.`,
+        `Se encontró una trayectoria con tolerancia final de ${resolution.goalPositionToleranceCm} cm y ${resolution.goalAngleToleranceDeg}°.`,
         turningRadius,
         expandedOffset + expanded,
         entryMotion,
@@ -502,7 +745,7 @@ function searchManeuver(
     const shiftedDirection = current.direction === 1 ? -1 : 1;
     const shiftedKey = poseKey(current.pose, resolution, shiftedDirection, current.steeringIndex);
     const shiftCost = current.cost + GEAR_CHANGE_COST_CM;
-    if (!closed.has(shiftedKey) && shiftCost < (bestCost.get(shiftedKey) ?? Infinity)) {
+    if (item.index !== 0 && !closed.has(shiftedKey) && shiftCost < (bestCost.get(shiftedKey) ?? Infinity)) {
       bestCost.set(shiftedKey, shiftCost);
       const shiftedIndex = nodes.push({
         pose: current.pose,
@@ -513,13 +756,7 @@ function searchManeuver(
       }) - 1;
       open.push({
         index: shiftedIndex,
-        priority: shiftCost + heuristic(
-          current.pose,
-          target,
-          turningRadius,
-          current.steeringIndex,
-          resolution.stepCm,
-        ),
+        priority: shiftCost + estimateFor(current.pose, current.steeringIndex),
       });
     }
 
@@ -551,8 +788,7 @@ function searchManeuver(
         direction: current.direction,
         steeringIndex,
       }) - 1;
-      const nextHeuristic = heuristic(nextPose, target, turningRadius, steeringIndex, resolution.stepCm);
-      open.push({ index: nextIndex, priority: nextCost + nextHeuristic });
+      open.push({ index: nextIndex, priority: nextCost + estimateFor(nextPose, steeringIndex) });
     }
   }
 

@@ -31,7 +31,10 @@ const project: Project = {
     },
     placement: { x: 125, y: 250, angle: 0 },
     obstacles: [{ id: 'pillar', kind: 'column', shape: 'circle', x: 20, y: 20, radius: 15 }],
-    maneuverSettings: { corridorWidth: 350, approachLength: 600 },
+    maneuverSettings: {
+      corridorWidth: 350, approachLength: 600, arrivalSide: 'left', startOffset: 20,
+      entryMode: 'tail-in', exitMode: 'nose-out', exitSide: 'right',
+    },
     view: { showGrid: true, showDimensions: false, snapToGrid: true, gridSize: 10 },
   },
 };
@@ -39,6 +42,14 @@ const project: Project = {
 describe('proyectos JSON', () => {
   it('exporta e importa un proyecto versionado con todas sus opciones', () => {
     expect(parseProjectJson(exportProjectJson(project))).toEqual(project);
+  });
+  it('carga proyectos antiguos sin ajustes de escenario usando valores por defecto', () => {
+    const legacy = JSON.parse(exportProjectJson(project));
+    legacy.snapshot.maneuverSettings = { corridorWidth: 350, approachLength: 600 };
+    expect(parseProjectJson(JSON.stringify(legacy)).snapshot.maneuverSettings).toEqual({
+      corridorWidth: 350, approachLength: 600, arrivalSide: 'straight', startOffset: 0,
+      entryMode: 'nose-in', exitMode: 'tail-out', exitSide: 'same',
+    });
   });
   it('rechaza JSON mal formado', () => {
     expect(() => parseProjectJson('{')).toThrow('JSON válido');

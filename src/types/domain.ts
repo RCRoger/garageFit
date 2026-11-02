@@ -116,6 +116,13 @@ export type CatalogVehicle = z.infer<typeof CatalogVehicleSchema>;
 export const ManeuverSettingsSchema = z.object({
   corridorWidth: cm(150, 2000),
   approachLength: cm(100, 3000),
+  /** Lado del pasillo desde el que llega el coche; `straight` = acceso recto frente a la entrada. */
+  arrivalSide: z.enum(['straight', 'left', 'right']).default('straight'),
+  /** Desplazamiento inicial a lo largo del pasillo (cm, + = alejarse del eje de la plaza). */
+  startOffset: cm(-2000, 2000).default(0),
+  entryMode: z.enum(['nose-in', 'tail-in']).default('nose-in'),
+  exitMode: z.enum(['nose-out', 'tail-out']).default('tail-out'),
+  exitSide: z.enum(['same', 'left', 'right']).default('same'),
 });
 export type ManeuverSettings = z.infer<typeof ManeuverSettingsSchema>;
 

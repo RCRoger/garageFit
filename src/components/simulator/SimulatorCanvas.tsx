@@ -42,9 +42,11 @@ export function SimulatorCanvas() {
     setPlacement, updateObstacle, setView,
   } = useSimulationStore();
   const analysis = useFitAnalysis();
-  const playbackPath = maneuverResult?.status === 'viable'
-    ? playbackDirection === 'entry' ? maneuverResult.entryMotion : maneuverResult.exitMotion
-    : [];
+  const hasEntryPlayback = maneuverResult?.status === 'viable' && maneuverResult.entryMotion.length > 1;
+  const hasExitPlayback = maneuverResult?.exitStatus === 'viable' && maneuverResult.exitMotion.length > 1;
+  const playbackPath = playbackDirection === 'entry'
+    ? hasEntryPlayback ? maneuverResult!.entryMotion : []
+    : hasExitPlayback ? maneuverResult!.exitMotion : [];
   const playbackTimeline = useMemo(() => createManeuverMotionTimeline(playbackPath), [playbackPath]);
   playbackProgressRef.current = playbackProgress;
   const motionSample = previewActive ? sampleManeuverMotion(playbackTimeline, playbackProgress) : null;
@@ -58,6 +60,7 @@ export function SimulatorCanvas() {
     setPlaybackProgress(0);
     setPreviewActive(false);
     setIsPlaying(false);
+    if (maneuverResult?.exitStatus !== 'viable') setPlaybackDirection('entry');
   }, [maneuverResult]);
 
   useEffect(() => {
@@ -193,13 +196,14 @@ export function SimulatorCanvas() {
           className={`rounded px-2 py-1 text-xs ${showDimensions ? 'bg-slate-100' : ''}`}
         >Cotas</button>
       </div>
-      {playbackPath.length > 1 && (
+      {(hasEntryPlayback || hasExitPlayback) && (
         <div className="absolute bottom-10 left-3 z-10 w-[min(320px,90%)] rounded border border-slate-200 bg-white/95 p-3 shadow-sm">
           <div className="flex items-center justify-between gap-2">
             <div className="flex rounded border border-slate-200 p-0.5" role="group" aria-label="Dirección de la maniobra">
               <button
                 type="button"
                 aria-pressed={playbackDirection === 'entry'}
+                disabled={!hasEntryPlayback}
                 onClick={() => {
                   setPlaybackDirection('entry');
                   setPlaybackProgress(0);
@@ -211,6 +215,8 @@ export function SimulatorCanvas() {
               <button
                 type="button"
                 aria-pressed={playbackDirection === 'exit'}
+                disabled={!hasExitPlayback}
+                title={hasExitPlayback ? undefined : maneuverResult?.exitReason}
                 onClick={() => {
                   setPlaybackDirection('exit');
                   setPlaybackProgress(0);
@@ -233,7 +239,7 @@ export function SimulatorCanvas() {
                   setPreviewActive(true);
                   setIsPlaying(true);
                 }}
-                disabled={reducedMotion}
+                disabled={reducedMotion || playbackPath.length < 2}
                 className="rounded bg-[#286b55] px-2 py-1 text-xs font-medium text-white hover:bg-[#205742] disabled:cursor-not-allowed disabled:opacity-50"
               >{isPlaying ? 'Pausar' : 'Reproducir'}</button>
               <button

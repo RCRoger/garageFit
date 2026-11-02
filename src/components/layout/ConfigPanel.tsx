@@ -5,6 +5,7 @@ import { NumberField } from './NumberField';
 import { VehicleLibraryPanel } from '@/components/vehicle/VehicleLibraryPanel';
 import { OptionalNumberField } from './OptionalNumberField';
 import { ManeuverPanel } from '@/components/maneuver/ManeuverPanel';
+import { OBSTACLE_TEMPLATES, createObstacleTemplate } from '@/domain/maneuver/obstacleTemplates';
 import { ProjectLibraryPanel } from '@/components/project/ProjectLibraryPanel';
 
 function fieldErrors(issues: { path: PropertyKey[]; message: string }[]): Record<string, string> {
@@ -31,7 +32,7 @@ function updateDoor(doors: Door[], id: string, patch: Partial<Door>): Door[] {
 
 export function ConfigPanel() {
   const {
-    spot, vehicle, placement, obstacles, setSpot, setVehicle, setPlacement,
+    spot, vehicle, placement, obstacles, maneuverSettings, setSpot, setVehicle, setPlacement,
     addObstacle, updateObstacle, removeObstacle, centerVehicle,
   } = useSimulationStore();
   const spotErr = fieldErrors(ParkingSpotSchema.safeParse(spot).error?.issues ?? []);
@@ -111,6 +112,16 @@ export function ConfigPanel() {
           <button onClick={addCircle} className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">+ Columna circular</button>
           <button onClick={() => addRect('wall')} className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">+ Muro</button>
         </div>
+        <div className="flex flex-wrap gap-1">
+          {OBSTACLE_TEMPLATES.map((template) => (
+            <button
+              key={template.id}
+              onClick={() => addObstacle(createObstacleTemplate(template.id, spot, maneuverSettings, crypto.randomUUID()))}
+              title="Se coloca según el lado de entrada y el pasillo configurados."
+              className="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs hover:bg-emerald-100"
+            >{template.label}</button>
+          ))}
+        </div>
         {obstacles.length === 0 && <p className="text-xs text-slate-500">Añade obstáculos o arrástralos sobre el plano.</p>}
         <div className="space-y-2">
           {obstacles.map((obstacle, index) => {
@@ -119,7 +130,7 @@ export function ConfigPanel() {
               <div key={obstacle.id} className="rounded border border-slate-200 p-2">
                 <div className="mb-1 flex items-center justify-between">
                   <span className="text-xs font-medium">
-                    {obstacle.kind === 'wall' ? 'Muro' : 'Columna'} {index + 1}
+                    {obstacle.kind === 'wall' ? 'Muro' : obstacle.kind === 'custom' ? 'Obstáculo' : 'Columna'} {index + 1}
                     {obstacle.shape === 'circle' ? ' · circular' : ' · rectangular'}
                   </span>
                   <button onClick={() => removeObstacle(obstacle.id)} aria-label={`Eliminar obstáculo ${index + 1}`} className="text-xs text-red-600 hover:text-red-800">Eliminar</button>
