@@ -10,6 +10,41 @@
   --color-accent: #286b55;
 }
 
+#app-shell {
+  --surface-workspace: var(--color-workspace);
+  --surface-paper: var(--color-paper);
+  --text-primary: var(--color-ink);
+  --text-secondary: #647067;
+  --border-subtle: var(--color-rule);
+  --control-surface: #fff;
+  --control-border: #d8d6ce;
+  --grid-line: #d9d7d0;
+  color: var(--text-primary);
+}
+
+#app-shell[data-theme='dark'] {
+  --color-workspace: #171d1a;
+  --color-paper: #202825;
+  --color-ink: #e4ebe6;
+  --color-muted: #a7b2aa;
+  --color-rule: #37433c;
+  --surface-workspace: var(--color-workspace);
+  --surface-paper: var(--color-paper);
+  --text-primary: #e4ebe6;
+  --text-secondary: #b0bbb3;
+  --border-subtle: #3a4740;
+  --control-surface: #252e2a;
+  --control-border: #46534b;
+  --grid-line: #344039;
+}
+
+.workspace-grid {
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
 html,
 body,
 #root {
@@ -59,9 +94,10 @@ input[type='checkbox'] {
 }
 
 #root main aside :is(input:not([type='checkbox']):not([class*='border-red-']), select) {
-  border-color: #d8d6ce;
+  border-color: var(--control-border);
   border-radius: 6px;
-  background-color: #fff;
+  background-color: var(--control-surface);
+  color: var(--text-primary);
 }
 
 #root main aside :is(input:not([type='checkbox']):not([class*='border-red-']), select):focus {
@@ -70,14 +106,123 @@ input[type='checkbox'] {
 }
 
 #root main aside button[class*='border-'] {
-  border-color: #d8d6ce;
+  border-color: var(--control-border);
   border-radius: 6px;
-  background-color: #fff;
+  background-color: var(--control-surface);
+  color: var(--text-primary);
 }
 
 #root main aside button[class*='border-']:hover:not(:disabled) {
-  border-color: #b7c8bc;
+  border-color: #8eaa96;
   background-color: #f5f6f1;
+}
+
+#app-shell[data-theme='dark'] [class~='bg-white'],
+#app-shell[data-theme='dark'] [class~='bg-white/90'],
+#app-shell[data-theme='dark'] [class~='bg-white/95'],
+#app-shell[data-theme='dark'] [class~='bg-slate-50'] {
+  background-color: #252e2a;
+}
+
+#app-shell[data-theme='dark'] [class~='bg-slate-100'] {
+  background-color: #303a35;
+}
+
+#app-shell[data-theme='dark'] [class~='bg-slate-200'] {
+  background-color: #3a4740;
+}
+
+#app-shell[data-theme='dark'] [class~='bg-slate-800'] {
+  background-color: #43534a;
+}
+
+#app-shell[data-theme='dark'] [class~='bg-slate-900/50'] {
+  background-color: rgb(0 0 0 / 65%);
+}
+
+#app-shell[data-theme='dark'] [class~='bg-blue-50'],
+#app-shell[data-theme='dark'] [class~='bg-blue-50/50'] {
+  background-color: #233446;
+}
+
+#app-shell[data-theme='dark'] [class~='bg-emerald-50'],
+#app-shell[data-theme='dark'] [class~='bg-emerald-100'] {
+  background-color: #203b30;
+}
+
+#app-shell[data-theme='dark'] [class~='bg-red-100'] {
+  background-color: #482b2b;
+}
+
+#app-shell[data-theme='dark'] [class~='bg-amber-50'],
+#app-shell[data-theme='dark'] [class~='bg-amber-100'] {
+  background-color: #46371f;
+}
+
+#app-shell[data-theme='dark'] [class~='bg-red-50'] {
+  background-color: #482b2b;
+}
+
+#app-shell[data-theme='dark'] [class*='hover:bg-slate-']:hover {
+  background-color: #303a35;
+}
+
+#app-shell[data-theme='dark'] [class*='hover:bg-emerald-']:hover {
+  background-color: #294638;
+}
+
+#app-shell[data-theme='dark'] [class~='text-slate-800'],
+#app-shell[data-theme='dark'] [class~='text-slate-700'],
+#app-shell[data-theme='dark'] [class~='text-slate-600'],
+#app-shell[data-theme='dark'] [class~='text-slate-500'],
+#app-shell[data-theme='dark'] [class~='text-slate-400'],
+#app-shell[data-theme='dark'] [class~='text-stone-500'] {
+  color: #b7c2ba;
+}
+
+#app-shell[data-theme='dark'] [class~='text-emerald-800'],
+#app-shell[data-theme='dark'] [class~='text-emerald-900'] {
+  color: #b3e4c4;
+}
+
+#app-shell[data-theme='dark'] [class~='text-amber-700'],
+#app-shell[data-theme='dark'] [class~='text-amber-800'],
+#app-shell[data-theme='dark'] [class~='text-amber-900'] {
+  color: #f4d391;
+}
+
+#app-shell[data-theme='dark'] [class~='text-red-600'],
+#app-shell[data-theme='dark'] [class~='text-red-700'],
+#app-shell[data-theme='dark'] [class~='text-red-800'] {
+  color: #ffb4a9;
+}
+
+#app-shell[data-theme='dark'] [class~='text-blue-700'] {
+  color: #a7ccff;
+}
+
+#app-shell[data-theme='dark'] [class*='border-slate-'],
+#app-shell[data-theme='dark'] [class*='border-stone-'] {
+  border-color: var(--border-subtle);
+}
+
+#app-shell[data-theme='dark'] [class*='border-blue-'] {
+  border-color: #52779a;
+}
+
+#app-shell[data-theme='dark'] #root main aside,
+#app-shell[data-theme='dark'] main aside {
+  scrollbar-color: #56645a transparent;
+}
+
+#app-shell[data-theme='dark'] main aside button[class*='border-']:hover:not(:disabled) {
+  border-color: #718b79;
+  background-color: #303a35;
+}
+
+#app-shell[data-theme='dark'] main aside :is(input:not([type='checkbox']):not([class*='border-red-']), select):focus {
+  border-color: #78b49a;
+  box-shadow: 0 0 0 3px #78b49a24;
 }
 
 #root main aside button:disabled {

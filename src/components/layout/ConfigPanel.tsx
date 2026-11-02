@@ -7,10 +7,12 @@ import { OptionalNumberField } from './OptionalNumberField';
 import { ManeuverPanel } from '@/components/maneuver/ManeuverPanel';
 import { OBSTACLE_TEMPLATES, createObstacleTemplate } from '@/domain/maneuver/obstacleTemplates';
 import { ProjectLibraryPanel } from '@/components/project/ProjectLibraryPanel';
+import { usePreferences } from '@/contexts/PreferencesContext';
+import { translateError } from '@/i18n';
 
-function fieldErrors(issues: { path: PropertyKey[]; message: string }[]): Record<string, string> {
+function fieldErrors(issues: { path: PropertyKey[]; message: string }[], language: 'ca' | 'en' | 'es'): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const i of issues) out[String(i.path[0])] = out[String(i.path[0])] ?? i.message;
+  for (const i of issues) out[String(i.path[0])] = out[String(i.path[0])] ?? translateError(language, i.message);
   return out;
 }
 
@@ -31,12 +33,13 @@ function updateDoor(doors: Door[], id: string, patch: Partial<Door>): Door[] {
 }
 
 export function ConfigPanel() {
+  const { t, language } = usePreferences();
   const {
     spot, vehicle, placement, obstacles, maneuverSettings, setSpot, setVehicle, setPlacement,
     addObstacle, updateObstacle, removeObstacle, centerVehicle,
   } = useSimulationStore();
-  const spotErr = fieldErrors(ParkingSpotSchema.safeParse(spot).error?.issues ?? []);
-  const vehErr = fieldErrors(VehicleDimensionsSchema.safeParse(vehicle).error?.issues ?? []);
+  const spotErr = fieldErrors(ParkingSpotSchema.safeParse(spot).error?.issues ?? [], language);
+  const vehErr = fieldErrors(VehicleDimensionsSchema.safeParse(vehicle).error?.issues ?? [], language);
 
   const addRect = (kind: 'column' | 'wall') => {
     const id = crypto.randomUUID();
@@ -66,34 +69,34 @@ export function ConfigPanel() {
   return (
     <div className="space-y-5 p-4">
       <section className="space-y-2">
-        <h2 className="text-sm font-semibold">Plaza de parking</h2>
+        <h2 className="text-sm font-semibold">{t('parkingSpot')}</h2>
         <div className="grid grid-cols-2 gap-2">
-          <NumberField label="Anchura" value={spot.width} onChange={(v) => setSpot({ width: v })} error={spotErr.width} />
-          <NumberField label="Longitud" value={spot.length} onChange={(v) => setSpot({ length: v })} error={spotErr.length} />
+          <NumberField label={t('width')} value={spot.width} onChange={(v) => setSpot({ width: v })} error={spotErr.width} />
+          <NumberField label={t('length')} value={spot.length} onChange={(v) => setSpot({ length: v })} error={spotErr.length} />
         </div>
         <label className="block text-xs">
-          <span className="mb-0.5 block font-medium text-slate-600">Tipo de plaza</span>
+          <span className="mb-0.5 block font-medium text-slate-600">{t('spotType')}</span>
           <select
             value={spot.kind}
             onChange={(e) => setSpot({ kind: e.target.value as typeof spot.kind })}
             className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
           >
-            <option value="individual">Individual</option>
-            <option value="double">Doble</option>
-            <option value="private-garage">Garaje privado</option>
+            <option value="individual">{t('individual')}</option>
+            <option value="double">{t('double')}</option>
+            <option value="private-garage">{t('privateGarage')}</option>
           </select>
         </label>
-        <label className="block text-xs" title="Lado por el que se accede. Se usará en la fase de maniobrabilidad.">
-          <span className="mb-0.5 block font-medium text-slate-600">Posición de entrada</span>
+        <label className="block text-xs" title={t('entranceHelp')}>
+          <span className="mb-0.5 block font-medium text-slate-600">{t('entrancePosition')}</span>
           <select
             value={spot.entrance}
             onChange={(e) => setSpot({ entrance: e.target.value as typeof spot.entrance })}
             className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
           >
-            <option value="bottom">Inferior</option>
-            <option value="top">Superior</option>
-            <option value="left">Izquierda</option>
-            <option value="right">Derecha</option>
+            <option value="bottom">{t('bottom')}</option>
+            <option value="top">{t('top')}</option>
+            <option value="left">{t('left')}</option>
+            <option value="right">{t('right')}</option>
           </select>
         </label>
       </section>
@@ -104,47 +107,47 @@ export function ConfigPanel() {
 
       <section className="space-y-2">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Obstáculos</h2>
+          <h2 className="text-sm font-semibold">{t('obstacles')}</h2>
           <span className="text-xs text-slate-500">{obstacles.length}</span>
         </div>
         <div className="flex flex-wrap gap-1">
-          <button onClick={() => addRect('column')} className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">+ Columna rectangular</button>
-          <button onClick={addCircle} className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">+ Columna circular</button>
-          <button onClick={() => addRect('wall')} className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">+ Muro</button>
+          <button onClick={() => addRect('column')} className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">{t('addRectangularColumn')}</button>
+          <button onClick={addCircle} className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">{t('addCircularColumn')}</button>
+          <button onClick={() => addRect('wall')} className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">{t('addWall')}</button>
         </div>
         <div className="flex flex-wrap gap-1">
           {OBSTACLE_TEMPLATES.map((template) => (
             <button
               key={template.id}
               onClick={() => addObstacle(createObstacleTemplate(template.id, spot, maneuverSettings, crypto.randomUUID()))}
-              title="Se coloca según el lado de entrada y el pasillo configurados."
+              title={t('obstacleTemplateHelp')}
               className="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs hover:bg-emerald-100"
-            >{template.label}</button>
+            >{t(template.id === 'opposite-car' ? 'parkedCarOpposite' : template.id === 'aisle-column' ? 'aisleColumn' : template.id === 'curb' ? 'curb' : 'backWall')}</button>
           ))}
         </div>
-        {obstacles.length === 0 && <p className="text-xs text-slate-500">Añade obstáculos o arrástralos sobre el plano.</p>}
+        {obstacles.length === 0 && <p className="text-xs text-slate-500">{t('addObstacleHint')}</p>}
         <div className="space-y-2">
           {obstacles.map((obstacle, index) => {
-            const errors = fieldErrors(ObstacleSchema.safeParse(obstacle).error?.issues ?? []);
+            const errors = fieldErrors(ObstacleSchema.safeParse(obstacle).error?.issues ?? [], language);
             return (
               <div key={obstacle.id} className="rounded border border-slate-200 p-2">
                 <div className="mb-1 flex items-center justify-between">
                   <span className="text-xs font-medium">
-                    {obstacle.kind === 'wall' ? 'Muro' : obstacle.kind === 'custom' ? 'Obstáculo' : 'Columna'} {index + 1}
-                    {obstacle.shape === 'circle' ? ' · circular' : ' · rectangular'}
+                    {obstacle.kind === 'wall' ? t('wall') : obstacle.kind === 'custom' ? t('obstacle') : t('column')} {index + 1}
+                    {obstacle.shape === 'circle' ? ` · ${t('circular')}` : ` · ${t('rectangular')}`}
                   </span>
-                  <button onClick={() => removeObstacle(obstacle.id)} aria-label={`Eliminar obstáculo ${index + 1}`} className="text-xs text-red-600 hover:text-red-800">Eliminar</button>
+                  <button onClick={() => removeObstacle(obstacle.id)} aria-label={t('removeObstacle', { index: index + 1 })} className="text-xs text-red-600 hover:text-red-800">{t('remove')}</button>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <NumberField label="X" value={obstacle.x} onChange={(v) => update(obstacle, 'x', v)} error={errors.x} />
                   <NumberField label="Y" value={obstacle.y} onChange={(v) => update(obstacle, 'y', v)} error={errors.y} />
                   {obstacle.shape === 'rect' ? (
                     <>
-                      <NumberField label="Anchura" value={obstacle.width} onChange={(v) => update(obstacle, 'width', v)} error={errors.width} />
-                      <NumberField label="Longitud" value={obstacle.height} onChange={(v) => update(obstacle, 'height', v)} error={errors.height} />
+                      <NumberField label={t('width')} value={obstacle.width} onChange={(v) => update(obstacle, 'width', v)} error={errors.width} />
+                      <NumberField label={t('length')} value={obstacle.height} onChange={(v) => update(obstacle, 'height', v)} error={errors.height} />
                     </>
                   ) : (
-                    <NumberField label="Radio" value={obstacle.radius} onChange={(v) => update(obstacle, 'radius', v)} error={errors.radius} />
+                    <NumberField label={t('radius')} value={obstacle.radius} onChange={(v) => update(obstacle, 'radius', v)} error={errors.radius} />
                   )}
                 </div>
               </div>
@@ -156,35 +159,34 @@ export function ConfigPanel() {
       <VehicleLibraryPanel />
 
       <section className="space-y-2">
-        <h2 className="text-sm font-semibold">Vehículo (manual)</h2>
+        <h2 className="text-sm font-semibold">{t('manualVehicle')}</h2>
         <div className="grid grid-cols-2 gap-2">
-          <NumberField label="Longitud" value={vehicle.length} onChange={(v) => setVehicle({ length: v })} error={vehErr.length} />
-          <NumberField label="Anchura carrocería" value={vehicle.bodyWidth} onChange={(v) => setVehicle({ bodyWidth: v })} error={vehErr.bodyWidth} />
-          <OptionalNumberField label="Espejos plegados" value={vehicle.widthMirrorsFolded} onChange={(v) => setVehicle({ widthMirrorsFolded: v })} error={vehErr.widthMirrorsFolded} />
-          <OptionalNumberField label="Espejos desplegados" value={vehicle.widthMirrorsExtended} onChange={(v) => setVehicle({ widthMirrorsExtended: v })} error={vehErr.widthMirrorsExtended} />
-          <NumberField label="Altura" value={vehicle.height} onChange={(v) => setVehicle({ height: v })} error={vehErr.height} />
-          <NumberField label="Entre ejes" value={vehicle.wheelbase} onChange={(v) => setVehicle({ wheelbase: v })} error={vehErr.wheelbase} />
+          <NumberField label={t('length')} value={vehicle.length} onChange={(v) => setVehicle({ length: v })} error={vehErr.length} />
+          <NumberField label={t('bodyWidth')} value={vehicle.bodyWidth} onChange={(v) => setVehicle({ bodyWidth: v })} error={vehErr.bodyWidth} />
+          <OptionalNumberField label={t('foldedMirrors')} value={vehicle.widthMirrorsFolded} onChange={(v) => setVehicle({ widthMirrorsFolded: v })} error={vehErr.widthMirrorsFolded} />
+          <OptionalNumberField label={t('extendedMirrors')} value={vehicle.widthMirrorsExtended} onChange={(v) => setVehicle({ widthMirrorsExtended: v })} error={vehErr.widthMirrorsExtended} />
+          <NumberField label={t('height')} value={vehicle.height} onChange={(v) => setVehicle({ height: v })} error={vehErr.height} />
+          <NumberField label={t('wheelbase')} value={vehicle.wheelbase} onChange={(v) => setVehicle({ wheelbase: v })} error={vehErr.wheelbase} />
           <OptionalNumberField
-            label="Diámetro de giro (si se conoce)"
+            label={t('turningDiameter')}
             value={vehicle.turningDiameter}
             onChange={(v) => setVehicle({ turningDiameter: v })}
             error={vehErr.turningDiameter}
           />
         </div>
         {(vehicle.widthMirrorsFolded === null || vehicle.widthMirrorsExtended === null) && (
-          <p className="text-xs text-amber-700">Anchura de espejos desconocida. Para el encaje se usa la anchura de carrocería; introduce las medidas de los espejos para comprobar el espacio real.</p>
+          <p className="text-xs text-amber-700">{t('mirrorsUnknown')}</p>
         )}
-        <p className="text-xs text-slate-500">Dimensiones editables; los datos que no conozcas pueden dejarse vacíos cuando el campo lo permita.</p>
+        <p className="text-xs text-slate-500">{t('editableDimensions')}</p>
       </section>
 
       <section className="space-y-2">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Puertas</h2>
+          <h2 className="text-sm font-semibold">{t('doors')}</h2>
           <span className="text-xs text-slate-500">{vehicle.doors.length}</span>
         </div>
         <p className="text-xs text-slate-500">
-          La geometría es una aproximación articulada. Los parámetros estimados se marcan como tales.
-          El área barrida debe quedar dentro de la plaza.
+          {t('doorGeometry')}
         </p>
         {vehErr.doors && <p className="text-xs text-red-600">{vehErr.doors}</p>}
         <div className="flex gap-1">
@@ -193,7 +195,7 @@ export function ConfigPanel() {
               key={side}
               onClick={() => setVehicle({ doors: [...vehicle.doors, {
                 id: crypto.randomUUID(),
-                label: side === 'left' ? 'Conductor' : 'Acompañante',
+                label: side === 'left' ? t('driver') : t('passenger'),
                 side,
                 hingeOffset: -vehicle.wheelbase / 2,
                 length: Math.min(100, Math.max(20, vehicle.length / 3)),
@@ -204,44 +206,44 @@ export function ConfigPanel() {
               }] })}
               className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
             >
-              + {side === 'left' ? 'Conductor' : 'Acompañante'} (estimada)
+              + {side === 'left' ? t('driver') : t('passenger')} ({t('estimated')})
             </button>
           ))}
         </div>
         {vehicle.doors.map((door) => {
-          const errors = fieldErrors(DoorSchema.safeParse(door).error?.issues ?? []);
+          const errors = fieldErrors(DoorSchema.safeParse(door).error?.issues ?? [], language);
           const setDoor = (patch: Partial<Door>) => setVehicle({ doors: updateDoor(vehicle.doors, door.id, patch) });
           return (
             <div key={door.id} className="space-y-2 rounded border border-slate-200 p-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium">{door.label}</span>
                 <button onClick={() => setVehicle({ doors: vehicle.doors.filter((item) => item.id !== door.id) })} className="text-xs text-red-600 hover:text-red-800">
-                  Eliminar
+                  {t('deleteDoor')}
                 </button>
               </div>
               <label className="flex items-center gap-1 text-xs text-slate-600">
                 <input type="checkbox" checked={door.enabled} onChange={(e) => setDoor({ enabled: e.target.checked })} />
-                Simular apertura
+                {t('simulateOpening')}
               </label>
               <label className="flex items-center gap-1 text-xs text-amber-700">
                 <input type="checkbox" checked={door.estimated} onChange={(e) => setDoor({ estimated: e.target.checked })} />
-                Datos estimados
+                {t('estimatedData')}
               </label>
               <label className="block text-xs">
-                <span className="mb-0.5 block font-medium text-slate-600">Lado</span>
+                <span className="mb-0.5 block font-medium text-slate-600">{t('side')}</span>
                 <select value={door.side} onChange={(e) => setDoor({ side: e.target.value as Door['side'] })} className="w-full rounded border border-slate-300 px-2 py-1 text-sm">
-                  <option value="left">Izquierdo</option>
-                  <option value="right">Derecho</option>
+                  <option value="left">{t('left')}</option>
+                  <option value="right">{t('right')}</option>
                 </select>
               </label>
               <div className="grid grid-cols-2 gap-2">
-                <NumberField label="Bisagra Y" value={door.hingeOffset} onChange={(v) => setDoor({ hingeOffset: v })} error={errors.hingeOffset} />
-                <NumberField label="Longitud" value={door.length} onChange={(v) => setDoor({ length: v })} error={errors.length} />
-                <NumberField label="Grosor" value={door.thickness} onChange={(v) => setDoor({ thickness: v })} error={errors.thickness} />
-                <NumberField label="Ángulo" unit="°" value={door.angleDeg} onChange={(v) => setDoor({ angleDeg: v })} error={errors.angleDeg} />
+                <NumberField label={t('hingeY')} value={door.hingeOffset} onChange={(v) => setDoor({ hingeOffset: v })} error={errors.hingeOffset} />
+                <NumberField label={t('length')} value={door.length} onChange={(v) => setDoor({ length: v })} error={errors.length} />
+                <NumberField label={t('thickness')} value={door.thickness} onChange={(v) => setDoor({ thickness: v })} error={errors.thickness} />
+                <NumberField label={t('angle')} unit="°" value={door.angleDeg} onChange={(v) => setDoor({ angleDeg: v })} error={errors.angleDeg} />
               </div>
               {(errors.hingeOffset || errors.length || vehErr.doors) && (
-                <p className="text-xs text-red-600">Comprueba que la bisagra y la puerta quedan dentro de la longitud del vehículo.</p>
+                <p className="text-xs text-red-600">{t('checkDoorFit')}</p>
               )}
             </div>
           );
@@ -249,14 +251,14 @@ export function ConfigPanel() {
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-sm font-semibold">Posición del vehículo</h2>
+        <h2 className="text-sm font-semibold">{t('vehiclePosition')}</h2>
         <div className="grid grid-cols-3 gap-2">
           <NumberField label="X" value={Math.round(placement.x * 10) / 10} onChange={(v) => setPlacement({ x: v })} />
           <NumberField label="Y" value={Math.round(placement.y * 10) / 10} onChange={(v) => setPlacement({ y: v })} />
-          <NumberField label="Ángulo" unit="°" value={placement.angle} onChange={(v) => setPlacement({ angle: v })} />
+          <NumberField label={t('angle')} unit="°" value={placement.angle} onChange={(v) => setPlacement({ angle: v })} />
         </div>
         <button onClick={centerVehicle} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs hover:bg-slate-50">
-          Centrar y alinear
+          {t('centerAndAlign')}
         </button>
       </section>
     </div>

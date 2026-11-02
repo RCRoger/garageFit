@@ -3,8 +3,11 @@ import { MANEUVER_CLEARANCE_CM, parkedAngle, planManeuver } from '@/domain/maneu
 import { ManeuverSettingsSchema, ParkingSpotSchema, VehicleDimensionsSchema, ObstacleSchema } from '@/types/domain';
 import { useSimulationStore } from '@/stores/simulationStore';
 import { NumberField } from '@/components/layout/NumberField';
+import { usePreferences } from '@/contexts/PreferencesContext';
+import { translateError } from '@/i18n';
 
 export function ManeuverPanel() {
+  const { t, language } = usePreferences();
   const {
     spot, vehicle, placement, obstacles, maneuverSettings, maneuverResult, setManeuverSettings, setManeuverResult, setPlacement,
   } = useSimulationStore();
@@ -26,21 +29,24 @@ export function ManeuverPanel() {
         const result = planManeuver(spot, vehicle, placement, obstacles, maneuverSettings);
         setManeuverResult(result);
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : 'Error desconocido al analizar la maniobra.');
+        setError(cause instanceof Error ? translateError(language, cause.message) : t('unknownManeuverError'));
       } finally {
         setBusy(false);
       }
     }, 0);
   };
 
-  const issue = (key: string) =>
-    settingsResult.success ? undefined : settingsResult.error.issues.find((item) => item.path[0] === key)?.message;
+  const issue = (key: string) => {
+    if (settingsResult.success) return undefined;
+    const message = settingsResult.error.issues.find((item) => item.path[0] === key)?.message;
+    return message ? translateError(language, message) : undefined;
+  };
   const exitUnavailable = maneuverResult?.status === 'viable' && maneuverResult.exitStatus !== 'viable';
 
   return (
     <section className="space-y-2 border-b border-slate-200 pb-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Maniobrabilidad</h2>
+        <h2 className="text-sm font-semibold">{t('maneuverability')}</h2>
         <button
           type="button"
           aria-expanded={settingsOpen}
@@ -48,15 +54,15 @@ export function ManeuverPanel() {
           onClick={() => setSettingsOpen((open) => !open)}
           className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
         >
-          ⚙ Ajustes
+          {t('settingsButton')}
         </button>
       </div>
       <p className="text-xs text-slate-500">
-        Modelo geométrico de bicicleta y obstáculos estáticos. Holgura configurada: {maneuverSettings.minimumObstacleClearance ?? MANEUVER_CLEARANCE_CM} cm. No es una guía de conducción real.
+        {t('maneuverModel', { clearance: maneuverSettings.minimumObstacleClearance ?? MANEUVER_CLEARANCE_CM })}
       </p>
       {settingsOpen && <div id="maneuver-settings" className="grid grid-cols-2 gap-2 rounded border border-slate-200 bg-slate-50 p-2">
         <NumberField
-          label="Distancia mínima a obstáculos"
+          label={t('minimumObstacleDistance')}
           value={maneuverSettings.minimumObstacleClearance ?? MANEUVER_CLEARANCE_CM}
           onChange={(v) => setManeuverSettings({ minimumObstacleClearance: v })}
           step={1}
@@ -65,79 +71,79 @@ export function ManeuverPanel() {
           error={issue('minimumObstacleClearance')}
         />
         <p className="col-span-2 text-xs text-slate-500">
-          Entre 0 y 100 cm. Con 0 se omite la holgura adicional; las colisiones geométricas siguen rechazándose.
+          {t('clearanceRange')}
         </p>
         <NumberField
-          label="Anchura del pasillo"
+          label={t('corridorWidth')}
           value={maneuverSettings.corridorWidth}
           onChange={(v) => setManeuverSettings({ corridorWidth: v })}
           error={issue('corridorWidth')}
         />
         <NumberField
-          label="Longitud de aproximación"
+          label={t('approachLength')}
           value={maneuverSettings.approachLength}
           onChange={(v) => setManeuverSettings({ approachLength: v })}
           error={issue('approachLength')}
         />
         <SelectField
-          label="Llegada desde"
+          label={t('arrivingFrom')}
           value={maneuverSettings.arrivalSide}
           onChange={(arrivalSide) => setManeuverSettings({ arrivalSide })}
           options={[
-            ['straight', 'Frente a la plaza'],
-            ['left', 'Izquierda del pasillo'],
-            ['right', 'Derecha del pasillo'],
+            ['straight', t('straightAhead')],
+            ['left', t('leftOfCorridor')],
+            ['right', t('rightOfCorridor')],
           ]}
         />
         <NumberField
-          label="Posición inicial"
+          label={t('startPosition')}
           value={maneuverSettings.startOffset}
           onChange={(v) => setManeuverSettings({ startOffset: v })}
-          title="Desplaza el punto de partida respecto al eje de la plaza (o de la calle)."
+          title={t('startPositionHelp')}
           error={issue('startOffset')}
         />
         <SelectField
-          label="Entrada"
+          label={t('entry')}
           value={maneuverSettings.entryMode}
           onChange={(entryMode) => {
             setManeuverSettings({ entryMode });
             setPlacement({ angle: parkedAngle(spot, entryMode) });
           }}
-          options={[['nose-in', 'De frente'], ['tail-in', 'De culo']]}
+          options={[['nose-in', t('noseIn')], ['tail-in', t('tailIn')]]}
         />
         <SelectField
-          label="Salida"
+          label={t('exit')}
           value={maneuverSettings.exitMode}
           onChange={(exitMode) => setManeuverSettings({ exitMode })}
-          options={[['nose-out', 'De frente'], ['tail-out', 'De culo']]}
+          options={[['nose-out', t('noseIn')], ['tail-out', t('tailIn')]]}
         />
         <SelectField
-          label="Salir hacia"
+          label={t('exitToward')}
           value={maneuverSettings.exitSide}
           onChange={(exitSide) => setManeuverSettings({ exitSide })}
           disabled={maneuverSettings.arrivalSide === 'straight'}
-          options={[['same', 'Mismo lado'], ['left', 'Izquierda'], ['right', 'Derecha']]}
+          options={[['same', t('sameSide')], ['left', t('left')], ['right', t('right')]]}
         />
       </div>}
       {maneuverSettings.arrivalSide !== 'straight' && (
         <p className="text-xs text-slate-500">
-          Con llegada lateral el pasillo es una calle transversal; la anchura debe permitir girar el coche.
+          {t('lateralArrivalHint')}
         </p>
       )}
       {vehicle.turningDiameter === null && (
-        <p className="text-xs text-amber-700">Falta el diámetro de giro; se mostrará “no verificado”.</p>
+        <p className="text-xs text-amber-700">{t('missingTurningDiameter')}</p>
       )}
       {vehicle.widthMirrorsFolded === null && (
-        <p className="text-xs text-amber-700">Se usa la anchura de carrocería como referencia de encaje; la holgura de los espejos no está verificada.</p>
+        <p className="text-xs text-amber-700">{t('usingBodyWidth')}</p>
       )}
       <button
         onClick={run}
         disabled={disabled || busy}
         className="rounded border border-slate-300 bg-white px-2 py-1 text-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {busy ? 'Buscando trayectoria…' : 'Analizar entrada y salida'}
+        {busy ? t('searchingPath') : t('analyzeManeuver')}
       </button>
-      {exitUnavailable && <p role="status" className="text-xs text-amber-700">Salida: {maneuverResult.exitReason}</p>}
+      {exitUnavailable && <p role="status" className="text-xs text-amber-700">{t('exitStatus', { reason: translateError(language, maneuverResult.exitReason) })}</p>}
       {error && <p role="alert" className="text-xs text-red-700">{error}</p>}
     </section>
   );

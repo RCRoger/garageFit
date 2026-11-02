@@ -10,6 +10,8 @@ import {
   sampleManeuverMotion,
 } from '@/domain/maneuver/maneuver';
 import { vehicleWidthForClearance } from '@/domain/collision/analysis';
+import { usePreferences } from '@/contexts/PreferencesContext';
+import { translateError } from '@/i18n';
 
 const PAD = 64;
 
@@ -25,6 +27,7 @@ function obstacleWithPosition(obstacle: Obstacle, x: number, y: number): Obstacl
 }
 
 export function SimulatorCanvas() {
+  const { t, theme, language } = usePreferences();
   const ref = useRef<HTMLDivElement>(null);
   const panGesture = useRef<PanGesture | null>(null);
   const playbackProgressRef = useRef(0);
@@ -125,6 +128,17 @@ export function SimulatorCanvas() {
 
   const color =
     analysis?.status === 'ok' ? '#10b981' : analysis?.status === 'limited' ? '#f59e0b' : analysis ? '#ef4444' : '#94a3b8';
+  const scenePalette = theme === 'dark'
+    ? {
+      corridor: '#252e2a', corridorStroke: '#69766d', grid: '#39463f', boundary: '#aab8ae',
+      measure: '#a7b3aa', measureText: '#c7d2ca', glass: '#87a8b8', wheel: '#101614',
+      outline: '#19231e', nearest: '#81b6ff', nearestText: '#a7ccff',
+    }
+    : {
+      corridor: '#f1f5f9', corridorStroke: '#94a3b8', grid: '#e2e8f0', boundary: '#334155',
+      measure: '#64748b', measureText: '#475569', glass: '#dbeafe', wheel: '#1e293b',
+      outline: '#334155', nearest: '#2563eb', nearestText: '#1d4ed8',
+    };
   const snap = (v: number) => (snapToGrid ? Math.round(v / gridSize) * gridSize : v);
 
   const zoomAt = (nextZoom: number, pointer?: { x: number; y: number }) => {
@@ -186,20 +200,20 @@ export function SimulatorCanvas() {
   return (
     <div id="simulator-canvas" ref={ref} className={`relative h-full w-full overflow-hidden bg-white ${panning ? 'cursor-grabbing' : 'cursor-default'}`}>
       <div className="absolute right-3 top-3 z-10 flex items-center gap-1 rounded border border-slate-200 bg-white/95 p-1 shadow-sm">
-        <button aria-label="Alejar" title="Alejar" onClick={() => zoomAt(zoom / 1.2)} className="rounded px-2 py-1 text-sm hover:bg-slate-100">−</button>
+        <button aria-label={t('zoomOut')} title={t('zoomOut')} onClick={() => zoomAt(zoom / 1.2)} className="rounded px-2 py-1 text-sm hover:bg-slate-100">−</button>
         <span className="min-w-12 text-center text-xs tabular-nums">{Math.round(zoom * 100)}%</span>
-        <button aria-label="Acercar" title="Acercar" onClick={() => zoomAt(zoom * 1.2)} className="rounded px-2 py-1 text-sm hover:bg-slate-100">+</button>
-        <button title="Restablecer vista" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }} className="rounded px-2 py-1 text-xs hover:bg-slate-100">Ajustar</button>
+        <button aria-label={t('zoomIn')} title={t('zoomIn')} onClick={() => zoomAt(zoom * 1.2)} className="rounded px-2 py-1 text-sm hover:bg-slate-100">+</button>
+        <button title={t('resetView')} onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }} className="rounded px-2 py-1 text-xs hover:bg-slate-100">{t('fitView')}</button>
         <button
-          title="Mostrar u ocultar cotas"
+          title={t('toggleDimensions')}
           onClick={() => setView({ showDimensions: !showDimensions })}
           className={`rounded px-2 py-1 text-xs ${showDimensions ? 'bg-slate-100' : ''}`}
-        >Cotas</button>
+        >{t('dimensions')}</button>
       </div>
       {(hasEntryPlayback || hasExitPlayback) && (
         <div className="absolute bottom-10 left-3 z-10 w-[min(320px,90%)] rounded border border-slate-200 bg-white/95 p-3 shadow-sm">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex rounded border border-slate-200 p-0.5" role="group" aria-label="Dirección de la maniobra">
+            <div className="flex rounded border border-slate-200 p-0.5" role="group" aria-label={t('maneuverDirection')}>
               <button
                 type="button"
                 aria-pressed={playbackDirection === 'entry'}
@@ -211,12 +225,12 @@ export function SimulatorCanvas() {
                   setIsPlaying(false);
                 }}
                 className={`rounded px-2 py-1 text-xs ${playbackDirection === 'entry' ? 'bg-[#202a27] text-white' : 'text-slate-600 hover:bg-slate-100'}`}
-              >Entrada</button>
+              >{t('entry')}</button>
               <button
                 type="button"
                 aria-pressed={playbackDirection === 'exit'}
                 disabled={!hasExitPlayback}
-                title={hasExitPlayback ? undefined : maneuverResult?.exitReason}
+                title={hasExitPlayback ? undefined : maneuverResult?.exitReason ? translateError(language, maneuverResult.exitReason) : undefined}
                 onClick={() => {
                   setPlaybackDirection('exit');
                   setPlaybackProgress(0);
@@ -224,12 +238,12 @@ export function SimulatorCanvas() {
                   setIsPlaying(false);
                 }}
                 className={`rounded px-2 py-1 text-xs ${playbackDirection === 'exit' ? 'bg-[#202a27] text-white' : 'text-slate-600 hover:bg-slate-100'}`}
-              >Salida</button>
+              >{t('exit')}</button>
             </div>
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                aria-label={isPlaying ? 'Pausar trayectoria' : 'Reproducir trayectoria'}
+                aria-label={isPlaying ? t('pausePath') : t('playPath')}
                 onClick={() => {
                   if (isPlaying) {
                     setIsPlaying(false);
@@ -241,21 +255,21 @@ export function SimulatorCanvas() {
                 }}
                 disabled={reducedMotion || playbackPath.length < 2}
                 className="rounded bg-[#286b55] px-2 py-1 text-xs font-medium text-white hover:bg-[#205742] disabled:cursor-not-allowed disabled:opacity-50"
-              >{isPlaying ? 'Pausar' : 'Reproducir'}</button>
+              >{isPlaying ? t('pausePath') : t('playPath')}</button>
               <button
                 type="button"
-                aria-label="Restablecer trayectoria"
+                aria-label={t('resetPath')}
                 onClick={() => {
                   setIsPlaying(false);
                   setPlaybackProgress(0);
                   setPreviewActive(false);
                 }}
                 className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
-              >Inicio</button>
+              >{t('start')}</button>
             </div>
           </div>
           <label className="mt-2 block">
-            <span className="sr-only">Progreso de {playbackDirection === 'entry' ? 'entrada' : 'salida'}</span>
+            <span className="sr-only">{t('progressOf', { direction: playbackDirection === 'entry' ? t('entry') : t('exit') })}</span>
             <input
               type="range"
               min="0"
@@ -272,19 +286,19 @@ export function SimulatorCanvas() {
             />
           </label>
           <div className="flex justify-between text-[10px] text-slate-500">
-            <span>{playbackDirection === 'entry' ? 'Pasillo' : 'Plaza'}</span>
+            <span>{playbackDirection === 'entry' ? t('lane') : t('parkingSpace')}</span>
             <span>{Math.round(playbackProgress * 100)} %</span>
-            <span>{playbackDirection === 'entry' ? 'Plaza' : 'Pasillo'}</span>
+            <span>{playbackDirection === 'entry' ? t('parkingSpace') : t('lane')}</span>
           </div>
           {reducedMotion && (
             <p role="status" className="mt-1 text-[10px] text-slate-500">
-              Movimiento reducido: recorre la ruta con el control de progreso.
+              {t('reducedMotionHint')}
             </p>
           )}
         </div>
       )}
       <div className="pointer-events-none absolute bottom-2 left-3 z-10 rounded bg-white/90 px-2 py-1 text-[11px] text-slate-500">
-        Rueda: zoom · Mayús + arrastrar: desplazar · Arrastra el coche o los obstáculos
+        {t('simulatorHelp')}
       </div>
       <Stage
         width={size.w}
@@ -302,37 +316,37 @@ export function SimulatorCanvas() {
               y={Math.min(...corridor.map((p) => p.y))}
               width={Math.max(...corridor.map((p) => p.x)) - Math.min(...corridor.map((p) => p.x))}
               height={Math.max(...corridor.map((p) => p.y)) - Math.min(...corridor.map((p) => p.y))}
-              fill="#f1f5f9"
-              stroke="#94a3b8"
+              fill={scenePalette.corridor}
+              stroke={scenePalette.corridorStroke}
               strokeWidth={2 / scale}
               dash={[8 / scale, 5 / scale]}
               listening={false}
             />
           )}
           {gridLines.map((p, i) => (
-            <Line key={`grid-${i}`} points={p} stroke="#e2e8f0" strokeWidth={1 / scale} listening={false} />
+            <Line key={`grid-${i}`} points={p} stroke={scenePalette.grid} strokeWidth={1 / scale} listening={false} />
           ))}
-          <Rect width={spot.width} height={spot.length} stroke="#334155" strokeWidth={3 / scale} fill="rgba(148,163,184,0.08)" listening={false} />
+          <Rect width={spot.width} height={spot.length} stroke={scenePalette.boundary} strokeWidth={3 / scale} fill={theme === 'dark' ? 'rgba(148,163,184,0.04)' : 'rgba(148,163,184,0.08)'} listening={false} />
           {corridor && (
             <Text
-              text={`Pasillo · ${maneuverSettings.corridorWidth} cm`}
+              text={t('corridor', { width: maneuverSettings.corridorWidth })}
               x={Math.min(...corridor.map((p) => p.x))}
               y={Math.min(...corridor.map((p) => p.y)) + 6 / scale}
               width={Math.max(...corridor.map((p) => p.x)) - Math.min(...corridor.map((p) => p.x))}
               align="center"
               fontSize={12 / scale}
-              fill="#64748b"
+              fill={scenePalette.measure}
               listening={false}
             />
           )}
           {showDimensions && (
             <>
-              <Line points={[0, -9 / scale, spot.width, -9 / scale]} stroke="#64748b" strokeWidth={1 / scale} listening={false} />
-              <Line points={[0, -14 / scale, 0, -4 / scale, spot.width, -4 / scale, spot.width, -14 / scale]} stroke="#64748b" strokeWidth={1 / scale} listening={false} />
-              <Text text={`${spot.width} cm`} x={0} y={-30 / scale} width={spot.width} align="center" fontSize={13 / scale} fill="#475569" listening={false} />
-              <Line points={[spot.width + 10 / scale, 0, spot.width + 10 / scale, spot.length]} stroke="#64748b" strokeWidth={1 / scale} listening={false} />
-              <Line points={[spot.width + 5 / scale, 0, spot.width + 15 / scale, 0, spot.width + 15 / scale, spot.length, spot.width + 5 / scale, spot.length]} stroke="#64748b" strokeWidth={1 / scale} listening={false} />
-              <Text text={`${spot.length} cm`} x={spot.width + 17 / scale} y={spot.length / 2} fontSize={13 / scale} fill="#475569" listening={false} />
+              <Line points={[0, -9 / scale, spot.width, -9 / scale]} stroke={scenePalette.measure} strokeWidth={1 / scale} listening={false} />
+              <Line points={[0, -14 / scale, 0, -4 / scale, spot.width, -4 / scale, spot.width, -14 / scale]} stroke={scenePalette.measure} strokeWidth={1 / scale} listening={false} />
+              <Text text={`${spot.width} cm`} x={0} y={-30 / scale} width={spot.width} align="center" fontSize={13 / scale} fill={scenePalette.measureText} listening={false} />
+              <Line points={[spot.width + 10 / scale, 0, spot.width + 10 / scale, spot.length]} stroke={scenePalette.measure} strokeWidth={1 / scale} listening={false} />
+              <Line points={[spot.width + 5 / scale, 0, spot.width + 15 / scale, 0, spot.width + 15 / scale, spot.length, spot.width + 5 / scale, spot.length]} stroke={scenePalette.measure} strokeWidth={1 / scale} listening={false} />
+              <Text text={`${spot.length} cm`} x={spot.width + 17 / scale} y={spot.length / 2} fontSize={13 / scale} fill={scenePalette.measureText} listening={false} />
             </>
           )}
 
@@ -364,7 +378,7 @@ export function SimulatorCanvas() {
               key: obstacle.id,
               fill,
               opacity: 0.72,
-              stroke: '#334155',
+              stroke: scenePalette.outline,
               strokeWidth: 1.5 / scale,
               draggable: true,
               onDragMove: (e: Konva.KonvaEventObject<DragEvent>) => {
@@ -383,7 +397,7 @@ export function SimulatorCanvas() {
                   <Circle x={obstacle.x} y={obstacle.y} radius={obstacle.radius} {...common} />
                 )}
                 <Text
-                  text={obstacle.kind === 'wall' ? 'Muro' : `O${index + 1}`}
+                  text={obstacle.kind === 'wall' ? t('wall') : `O${index + 1}`}
                   x={obstacle.shape === 'rect' ? obstacle.x : obstacle.x - obstacle.radius}
                   y={obstacle.shape === 'rect' ? obstacle.y : obstacle.y - obstacle.radius}
                   width={obstacle.shape === 'rect' ? obstacle.width : obstacle.radius * 2}
@@ -407,7 +421,7 @@ export function SimulatorCanvas() {
                   analysis.nearestObstacle.end.x,
                   analysis.nearestObstacle.end.y,
                 ]}
-                stroke="#2563eb"
+                stroke={scenePalette.nearest}
                 strokeWidth={2 / scale}
                 dash={[6 / scale, 4 / scale]}
                 listening={false}
@@ -417,7 +431,7 @@ export function SimulatorCanvas() {
                 x={(analysis.nearestObstacle.start.x + analysis.nearestObstacle.end.x) / 2}
                 y={(analysis.nearestObstacle.start.y + analysis.nearestObstacle.end.y) / 2 - 15 / scale}
                 fontSize={11 / scale}
-                fill="#1d4ed8"
+                fill={scenePalette.nearestText}
                 listening={false}
               />
             </>
@@ -470,7 +484,7 @@ export function SimulatorCanvas() {
             onDragEnd={(e) => setPlacement({ x: e.target.x(), y: e.target.y() })}
           >
             {/* Silueta esquemática de carrocería: proporciones derivadas de las dimensiones introducidas. */}
-            <Line points={bodyShape} closed fill={color} opacity={0.78} stroke="#334155" strokeWidth={1.5 / scale} />
+            <Line points={bodyShape} closed fill={color} opacity={0.78} stroke={scenePalette.outline} strokeWidth={1.5 / scale} />
             <Line
               points={[
                 -carW * 0.36, -carL * 0.23,
@@ -480,7 +494,7 @@ export function SimulatorCanvas() {
                 carW * 0.32, -carL * 0.02,
                 -carW * 0.32, -carL * 0.02,
               ]}
-              closed fill="#dbeafe" stroke="#64748b" strokeWidth={1 / scale} listening={false}
+              closed fill={scenePalette.glass} stroke={scenePalette.measure} strokeWidth={1 / scale} listening={false}
             />
             <Line
               points={[
@@ -491,7 +505,7 @@ export function SimulatorCanvas() {
                 -carW * 0.23, carL * 0.34,
                 -carW * 0.29, carL * 0.26,
               ]}
-              closed fill="#dbeafe" stroke="#64748b" strokeWidth={1 / scale} listening={false}
+              closed fill={scenePalette.glass} stroke={scenePalette.measure} strokeWidth={1 / scale} listening={false}
             />
             {[-1, 1].map((side) => (
               <Group key={side} listening={false}>
@@ -507,7 +521,7 @@ export function SimulatorCanvas() {
                     y={-carL * 0.06}
                     width={carW * 0.1}
                     height={carL * 0.12}
-                    fill="#1e293b"
+                    fill={scenePalette.wheel}
                     cornerRadius={carW * 0.04}
                   />
                 </Group>
@@ -516,7 +530,7 @@ export function SimulatorCanvas() {
                   y={vehicle.wheelbase * 0.25}
                   width={carW * 0.1}
                   height={carL * 0.12}
-                  fill="#1e293b"
+                  fill={scenePalette.wheel}
                   cornerRadius={carW * 0.04}
                 />
                 <Rect
@@ -524,16 +538,16 @@ export function SimulatorCanvas() {
                   y={-carL * 0.34}
                   width={carW * 0.07}
                   height={carL * 0.07}
-                  fill="#475569"
+                  fill={scenePalette.measureText}
                   cornerRadius={carW * 0.035}
                 />
               </Group>
             ))}
-            <Line points={[-carW * 0.47, 0, carW * 0.47, 0]} stroke="#64748b" strokeWidth={1 / scale} dash={[5 / scale, 4 / scale]} listening={false} />
+            <Line points={[-carW * 0.47, 0, carW * 0.47, 0]} stroke={scenePalette.measure} strokeWidth={1 / scale} dash={[5 / scale, 4 / scale]} listening={false} />
             {showDimensions && (
               <>
-                <Text text={`${mirrorW} cm${vehicle.widthMirrorsFolded === null ? ' (carrocería)' : ''}`} x={-mirrorW / 2} y={carL / 2 + 5 / scale} width={mirrorW} align="center" fontSize={11 / scale} fill="#334155" listening={false} />
-                <Text text={`${vehicle.length} cm`} x={carW / 2 + 4 / scale} y={-carL / 2} fontSize={11 / scale} fill="#334155" listening={false} />
+                <Text text={`${mirrorW} cm${vehicle.widthMirrorsFolded === null ? ` (${t('body')})` : ''}`} x={-mirrorW / 2} y={carL / 2 + 5 / scale} width={mirrorW} align="center" fontSize={11 / scale} fill={scenePalette.measureText} listening={false} />
+                <Text text={`${vehicle.length} cm`} x={carW / 2 + 4 / scale} y={-carL / 2} fontSize={11 / scale} fill={scenePalette.measureText} listening={false} />
               </>
             )}
           </Group>
