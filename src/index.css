@@ -1,4 +1,142 @@
 @import 'tailwindcss';
 
-html, body, #root { height: 100%; margin: 0; }
-body { @apply bg-slate-100 text-slate-800 antialiased; font-family: system-ui, sans-serif; }
+@theme {
+  --color-workspace: #f3f2ed;
+  --color-paper: #fbfaf7;
+  --color-graphite: #202a27;
+  --color-ink: #26312d;
+  --color-muted: #777a72;
+  --color-rule: #e4e1d8;
+  --color-accent: #286b55;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  @apply bg-stone-100 text-slate-800 antialiased;
+  font-family: system-ui, sans-serif;
+}
+
+button {
+  cursor: pointer;
+}
+
+input[type='checkbox'] {
+  accent-color: #78b49a;
+}
+
+#root main aside {
+  color: var(--color-ink);
+  scrollbar-color: #c9c7bd transparent;
+  scrollbar-width: thin;
+}
+
+#root main aside .space-y-5,
+#root main aside .space-y-4 {
+  padding: 18px 20px;
+}
+
+#root main aside .space-y-5 > section,
+#root main aside .space-y-4 > section {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--color-rule);
+}
+
+#root main aside .space-y-5 > section:last-child,
+#root main aside .space-y-4 > section:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+#root main aside h2,
+#root main aside h3 {
+  letter-spacing: -0.015em;
+}
+
+#root main aside :is(input:not([type='checkbox']):not([class*='border-red-']), select) {
+  border-color: #d8d6ce;
+  border-radius: 6px;
+  background-color: #fff;
+}
+
+#root main aside :is(input:not([type='checkbox']):not([class*='border-red-']), select):focus {
+  border-color: #78b49a;
+  box-shadow: 0 0 0 3px #78b49a24;
+}
+
+#root main aside button[class*='border-'] {
+  border-color: #d8d6ce;
+  border-radius: 6px;
+  background-color: #fff;
+}
+
+#root main aside button[class*='border-']:hover:not(:disabled) {
+  border-color: #b7c8bc;
+  background-color: #f5f6f1;
+}
+
+#root main aside button:disabled {
+  cursor: not-allowed;
+}
+
+button,
+input,
+select {
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+:is(button, input, select, a):focus-visible {
+  outline: 2px solid #78b49a;
+  outline-offset: 2px;
+}
+
+::selection {
+  background: #d7e8dc;
+  color: #202a27;
+}
+
+@media (min-width: 768px) and (max-width: 1199px) {
+  #root main {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    grid-template-rows: minmax(560px, 1fr) auto;
+    overflow-y: auto;
+  }
+
+  #root main > aside:first-child {
+    grid-column: 1;
+    grid-row: 1;
+    width: auto;
+  }
+
+  #root main > section {
+    grid-column: 2;
+    grid-row: 1;
+    min-height: 560px;
+  }
+
+  #root main > aside:last-child {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: auto;
+    max-height: 320px;
+    border-top: 1px solid var(--color-rule);
+    border-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
