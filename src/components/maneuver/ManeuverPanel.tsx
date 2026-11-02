@@ -10,6 +10,7 @@ export function ManeuverPanel() {
   } = useSimulationStore();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsResult = ManeuverSettingsSchema.safeParse(maneuverSettings);
   const disabled = !settingsResult.success || !ParkingSpotSchema.safeParse(spot).success ||
     !VehicleDimensionsSchema.safeParse(vehicle).success ||
@@ -38,11 +39,34 @@ export function ManeuverPanel() {
 
   return (
     <section className="space-y-2 border-b border-slate-200 pb-4">
-      <h2 className="text-sm font-semibold">Maniobrabilidad</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold">Maniobrabilidad</h2>
+        <button
+          type="button"
+          aria-expanded={settingsOpen}
+          aria-controls="maneuver-settings"
+          onClick={() => setSettingsOpen((open) => !open)}
+          className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
+        >
+          ⚙ Ajustes
+        </button>
+      </div>
       <p className="text-xs text-slate-500">
-        Modelo geométrico de bicicleta y obstáculos estáticos. Exige {MANEUVER_CLEARANCE_CM} cm de holgura frente a obstáculos y prioriza más margen frente a una ruta corta. No es una guía de conducción real.
+        Modelo geométrico de bicicleta y obstáculos estáticos. Holgura configurada: {maneuverSettings.minimumObstacleClearance ?? MANEUVER_CLEARANCE_CM} cm. No es una guía de conducción real.
       </p>
-      <div className="grid grid-cols-2 gap-2">
+      {settingsOpen && <div id="maneuver-settings" className="grid grid-cols-2 gap-2 rounded border border-slate-200 bg-slate-50 p-2">
+        <NumberField
+          label="Distancia mínima a obstáculos"
+          value={maneuverSettings.minimumObstacleClearance ?? MANEUVER_CLEARANCE_CM}
+          onChange={(v) => setManeuverSettings({ minimumObstacleClearance: v })}
+          step={1}
+          min={0}
+          max={100}
+          error={issue('minimumObstacleClearance')}
+        />
+        <p className="col-span-2 text-xs text-slate-500">
+          Entre 0 y 100 cm. Con 0 se omite la holgura adicional; las colisiones geométricas siguen rechazándose.
+        </p>
         <NumberField
           label="Anchura del pasillo"
           value={maneuverSettings.corridorWidth}
@@ -94,7 +118,7 @@ export function ManeuverPanel() {
           disabled={maneuverSettings.arrivalSide === 'straight'}
           options={[['same', 'Mismo lado'], ['left', 'Izquierda'], ['right', 'Derecha']]}
         />
-      </div>
+      </div>}
       {maneuverSettings.arrivalSide !== 'straight' && (
         <p className="text-xs text-slate-500">
           Con llegada lateral el pasillo es una calle transversal; la anchura debe permitir girar el coche.

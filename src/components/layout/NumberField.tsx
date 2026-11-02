@@ -6,12 +6,14 @@ interface Props {
   onChange: (v: number) => void;
   unit?: string;
   step?: number;
+  min?: number;
+  max?: number;
   title?: string;
   error?: string;
 }
 
 /** Campo numérico que acepta texto intermedio y solo propaga valores finitos. */
-export function NumberField({ label, value, onChange, unit = 'cm', step = 1, title, error }: Props) {
+export function NumberField({ label, value, onChange, unit = 'cm', step = 1, min, max, title, error }: Props) {
   const [text, setText] = useState(String(value));
   useEffect(() => {
     if (Number(text) !== value) setText(String(value));
@@ -25,6 +27,8 @@ export function NumberField({ label, value, onChange, unit = 'cm', step = 1, tit
         <input
           type="number"
           step={step}
+          min={min}
+          max={max}
           value={text}
           onChange={(e) => {
             setText(e.target.value);

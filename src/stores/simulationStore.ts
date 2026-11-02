@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { DEFAULT_OBSTACLE_CLEARANCE_CM } from '@/types/domain';
 import type { ManeuverSettings, Obstacle, ParkingSpot, Placement, VehicleDimensions } from '@/types/domain';
 import type { ManeuverResult } from '@/domain/maneuver/maneuver';
 import type { SimulationSnapshot } from '@/types/project';
@@ -44,6 +45,7 @@ export const useSimulationStore = create<SimulationState>((set) => ({
   obstacles: [],
   maneuverSettings: {
     corridorWidth: 350, approachLength: 600, arrivalSide: 'straight', startOffset: 0,
+    minimumObstacleClearance: DEFAULT_OBSTACLE_CLEARANCE_CM,
     entryMode: 'nose-in', exitMode: 'tail-out', exitSide: 'same',
   },
   maneuverResult: null,

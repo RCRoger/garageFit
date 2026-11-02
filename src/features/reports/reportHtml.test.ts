@@ -27,13 +27,15 @@ describe('informe imprimible', () => {
       obstacles: [],
       analysis,
       maneuver: null,
+      maneuverClearanceCm: 25,
       imageDataUrl: null,
     });
     expect(html).toContain('250 × 500 cm');
     expect(html).toContain('30.0 cm');
     expect(html).toContain('No verificada: no se ha ejecutado el análisis de maniobra');
     expect(html).toContain('modelo geométrico de bicicleta');
-    expect(html).toContain('holgura mínima de 10 cm');
+    expect(html).toContain('holgura mínima configurada de 25 cm');
+    expect(html).toContain('Holgura mínima a obstáculos</th><td>25.0 cm');
     expect(html).toContain('no garantiza una maniobra real segura');
     expect(html).toContain('La maniobrabilidad no está verificada por completo');
     expect(html).toContain('entrada y la salida se planifican por separado');
@@ -50,6 +52,7 @@ describe('informe imprimible', () => {
       obstacles: [],
       analysis,
       maneuver: null,
+      maneuverClearanceCm: 10,
       imageDataUrl: null,
     });
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
@@ -66,6 +69,7 @@ describe('informe imprimible', () => {
       obstacles: [],
       analysis,
       maneuver: null,
+      maneuverClearanceCm: 10,
       imageDataUrl: null,
     });
     expect(html).toContain('anchura de uno o ambos espejos no está disponible');
@@ -81,6 +85,7 @@ describe('informe imprimible', () => {
       obstacles: [],
       analysis,
       maneuver: null,
+      maneuverClearanceCm: 10,
       imageDataUrl: 'data:image/png;base64,abc123==',
     });
     expect(html).toContain('<img class="simulation"');
@@ -92,6 +97,7 @@ describe('informe imprimible', () => {
       obstacles: [],
       analysis,
       maneuver: null,
+      maneuverClearanceCm: 10,
       imageDataUrl: 'data:image/png;base64,"><script>',
     });
     expect(invalid).not.toContain('<img class="simulation"');

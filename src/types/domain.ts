@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 const cm = (min: number, max: number) => z.number().finite().min(min).max(max);
+export const DEFAULT_OBSTACLE_CLEARANCE_CM = 10;
 
 /** Plaza rectangular. Origen (0,0) en la esquina superior izquierda; X = anchura, Y = longitud. */
 export const ParkingSpotSchema = z.object({
@@ -120,6 +121,8 @@ export const ManeuverSettingsSchema = z.object({
   arrivalSide: z.enum(['straight', 'left', 'right']).default('straight'),
   /** Desplazamiento inicial a lo largo del pasillo (cm, + = alejarse del eje de la plaza). */
   startOffset: cm(-2000, 2000).default(0),
+  /** Holgura mínima entre la carrocería y los obstáculos (cm). */
+  minimumObstacleClearance: cm(0, 100).default(DEFAULT_OBSTACLE_CLEARANCE_CM),
   entryMode: z.enum(['nose-in', 'tail-in']).default('nose-in'),
   exitMode: z.enum(['nose-out', 'tail-out']).default('tail-out'),
   exitSide: z.enum(['same', 'left', 'right']).default('same'),

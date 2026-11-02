@@ -33,7 +33,7 @@ const project: Project = {
     obstacles: [{ id: 'pillar', kind: 'column', shape: 'circle', x: 20, y: 20, radius: 15 }],
     maneuverSettings: {
       corridorWidth: 350, approachLength: 600, arrivalSide: 'left', startOffset: 20,
-      entryMode: 'tail-in', exitMode: 'nose-out', exitSide: 'right',
+      minimumObstacleClearance: 25, entryMode: 'tail-in', exitMode: 'nose-out', exitSide: 'right',
     },
     view: { showGrid: true, showDimensions: false, snapToGrid: true, gridSize: 10 },
   },
@@ -48,8 +48,16 @@ describe('proyectos JSON', () => {
     legacy.snapshot.maneuverSettings = { corridorWidth: 350, approachLength: 600 };
     expect(parseProjectJson(JSON.stringify(legacy)).snapshot.maneuverSettings).toEqual({
       corridorWidth: 350, approachLength: 600, arrivalSide: 'straight', startOffset: 0,
-      entryMode: 'nose-in', exitMode: 'tail-out', exitSide: 'same',
+      minimumObstacleClearance: 10, entryMode: 'nose-in', exitMode: 'tail-out', exitSide: 'same',
     });
+  });
+  it('valida el rango de holgura configurable y permite desactivar el margen adicional', () => {
+    const snapshot = JSON.parse(exportProjectJson(project));
+    snapshot.snapshot.maneuverSettings.minimumObstacleClearance = 0;
+    expect(parseProjectJson(JSON.stringify(snapshot)).snapshot.maneuverSettings.minimumObstacleClearance).toBe(0);
+
+    snapshot.snapshot.maneuverSettings.minimumObstacleClearance = 101;
+    expect(() => parseProjectJson(JSON.stringify(snapshot))).toThrow('minimumObstacleClearance');
   });
   it('rechaza JSON mal formado', () => {
     expect(() => parseProjectJson('{')).toThrow('JSON válido');

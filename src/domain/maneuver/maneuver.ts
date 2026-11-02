@@ -2,7 +2,7 @@ import { polygonDistance, polygonsIntersect } from '../collision/collision';
 import { axisRect, orientedRect, type Polygon } from '../geometry/polygon';
 import { degToRad, vec } from '../geometry/vec';
 import { obstaclePolygon, vehicleWidthForClearance } from '../collision/analysis';
-import type { Obstacle, ParkingSpot, Placement, VehicleDimensions } from '@/types/domain';
+import { DEFAULT_OBSTACLE_CLEARANCE_CM, type Obstacle, type ParkingSpot, type Placement, type VehicleDimensions } from '@/types/domain';
 
 export type ManeuverStatus = 'viable' | 'not-viable' | 'not-verified';
 
@@ -44,6 +44,7 @@ export interface ManeuverMotionSample {
 export interface ManeuverSettings {
   corridorWidth: number;
   approachLength: number;
+  minimumObstacleClearance?: number;
   arrivalSide?: 'straight' | 'left' | 'right';
   startOffset?: number;
   entryMode?: 'nose-in' | 'tail-in';
@@ -77,7 +78,7 @@ interface QueueItem {
 }
 
 const COLLISION_STEP_CM = 10;
-export const MANEUVER_CLEARANCE_CM = 10;
+export const MANEUVER_CLEARANCE_CM = DEFAULT_OBSTACLE_CLEARANCE_CM;
 const PREFERRED_OBSTACLE_CLEARANCE_CM = 30;
 const CLEARANCE_COST_WEIGHT = 2;
 const STEERING_LEVELS = [-1, -0.5, 0, 0.5, 1] as const;
@@ -271,13 +272,13 @@ function poseAllowed(
   corridorBounds: readonly Rect[],
   vehicle: VehicleDimensions,
   obstacles: readonly Polygon[],
+  minimumObstacleClearance: number,
 ): boolean {
   const car = footprint(vehicle, pose);
-  const clearance = MANEUVER_CLEARANCE_CM;
   const clearanceFootprint = orientedRect(
     vec(pose.x, pose.y),
-    vehicleWidthForClearance(vehicle) + clearance * 2,
-    vehicle.length + clearance * 2,
+    vehicleWidthForClearance(vehicle) + minimumObstacleClearance * 2,
+    vehicle.length + minimumObstacleClearance * 2,
     pose.angle,
   );
   for (const obstacle of obstacles) {
@@ -358,11 +359,13 @@ function clearancePenalty(
   vehicle: VehicleDimensions,
   obstacles: readonly Polygon[],
   distance: number,
+  minimumObstacleClearance: number,
 ): number {
   if (obstacles.length === 0) return 0;
   const car = footprint(vehicle, pose);
   const clearance = Math.min(...obstacles.map((obstacle) => polygonDistance(car, obstacle)));
-  const risk = Math.max(0, (PREFERRED_OBSTACLE_CLEARANCE_CM - clearance) / PREFERRED_OBSTACLE_CLEARANCE_CM);
+  const preferredClearance = Math.max(minimumObstacleClearance, PREFERRED_OBSTACLE_CLEARANCE_CM);
+  const risk = Math.max(0, (preferredClearance - clearance) / preferredClearance);
   return distance * risk * CLEARANCE_COST_WEIGHT;
 }
 
@@ -370,11 +373,13 @@ function preservesPreferredObstacleClearance(
   path: readonly ManeuverMotionFrame[],
   vehicle: VehicleDimensions,
   obstacles: readonly Polygon[],
+  minimumObstacleClearance: number,
 ): boolean {
+  const preferredClearance = Math.max(minimumObstacleClearance, PREFERRED_OBSTACLE_CLEARANCE_CM);
   return path.every(({ pose }) => {
     const car = footprint(vehicle, pose);
     return obstacles.every((obstacle) =>
-      polygonDistance(car, obstacle) >= PREFERRED_OBSTACLE_CLEARANCE_CM);
+      polygonDistance(car, obstacle) >= preferredClearance);
   });
 }
 
@@ -467,6 +472,7 @@ function straightSegment(
   corridorBounds: readonly Rect[],
   vehicle: VehicleDimensions,
   obstacles: readonly Polygon[],
+  minimumObstacleClearance: number,
 ): ManeuverMotionFrame[] | null {
   const distance = Math.hypot(to.x - from.x, to.y - from.y);
   const steps = Math.max(1, Math.ceil(distance / COLLISION_STEP_CM));
@@ -478,7 +484,7 @@ function straightSegment(
       y: from.y + (to.y - from.y) * progress,
       angle: from.angle,
     };
-    if (!poseAllowed(pose, spot, corridorBounds, vehicle, obstacles)) return null;
+    if (!poseAllowed(pose, spot, corridorBounds, vehicle, obstacles, minimumObstacleClearance)) return null;
     segment.push({ pose, direction: 1, steeringAngle: 0 });
   }
   return segment;
@@ -544,6 +550,7 @@ interface PlanContext {
   obstacles: readonly Polygon[];
   turningRadius: number;
   maxSteeringAngle: number;
+  minimumObstacleClearance: number;
 }
 
 /** Coarse pass followed by a finer retry; coarse hits are not trusted on their own. */
@@ -570,6 +577,7 @@ function searchWithRefinement(
       context.obstacles,
       context.turningRadius,
       context.maxSteeringAngle,
+      context.minimumObstacleClearance,
       resolution,
       stageBudget,
       expandedNodes,
@@ -591,7 +599,7 @@ function searchWithRefinement(
   }
   return result(
     'not-viable',
-    `No se encontró una trayectoria con al menos ${MANEUVER_CLEARANCE_CM} cm de holgura tras agotar la búsqueda gruesa y refinada (${SEARCH_RESOLUTIONS[1].stepCm} cm, ${SEARCH_RESOLUTIONS[1].positionBinCm} cm/${SEARCH_RESOLUTIONS[1].angleBinDeg}°).`,
+    `No se encontró una trayectoria con al menos ${context.minimumObstacleClearance} cm de holgura tras agotar la búsqueda gruesa y refinada (${SEARCH_RESOLUTIONS[1].stepCm} cm, ${SEARCH_RESOLUTIONS[1].positionBinCm} cm/${SEARCH_RESOLUTIONS[1].angleBinDeg}°).`,
     context.turningRadius,
     expandedNodes,
   );
@@ -614,6 +622,7 @@ export function planManeuver(
     return result('not-verified', 'Introduce el diámetro de giro para usar el modelo bicicleta.', null);
   }
   const turningRadius = vehicle.turningDiameter / 2;
+  const minimumObstacleClearance = settings.minimumObstacleClearance ?? MANEUVER_CLEARANCE_CM;
   const entryMode = settings.entryMode ?? 'nose-in';
   const exitMode = settings.exitMode ?? (entryMode === 'tail-in' ? 'nose-out' : 'tail-out');
   const target: Placement = { x: placement.x, y: placement.y, angle: parkedAngle(spot, entryMode) };
@@ -623,13 +632,14 @@ export function planManeuver(
   const maxSteeringAngle = Math.atan(vehicle.wheelbase / turningRadius);
   const context: PlanContext = {
     spot, domain: corridorBounds, vehicle, obstacles: obstaclePolygons, turningRadius, maxSteeringAngle,
+    minimumObstacleClearance,
   };
 
-  if (!poseAllowed(actualStart, spot, corridorBounds, vehicle, obstaclePolygons)) {
-    return result('not-viable', `El vehículo no cabe con ${MANEUVER_CLEARANCE_CM} cm de holgura en la zona de aproximación configurada.`, turningRadius);
+  if (!poseAllowed(actualStart, spot, corridorBounds, vehicle, obstaclePolygons, minimumObstacleClearance)) {
+    return result('not-viable', `El vehículo no cabe con ${minimumObstacleClearance} cm de holgura en la zona de aproximación configurada.`, turningRadius);
   }
-  if (!poseAllowed(target, spot, corridorBounds, vehicle, obstaclePolygons)) {
-    return result('not-viable', `La posición final colisiona, no conserva la holgura mínima de ${MANEUVER_CLEARANCE_CM} cm o sale del área modelada.`, turningRadius);
+  if (!poseAllowed(target, spot, corridorBounds, vehicle, obstaclePolygons, minimumObstacleClearance)) {
+    return result('not-viable', `La posición final colisiona, no conserva la holgura mínima de ${minimumObstacleClearance} cm o sale del área modelada.`, turningRadius);
   }
 
   const entry = planEntry(context, settings, actualStart, target, maxExpanded);
@@ -684,16 +694,21 @@ function planEntry(
     corridorBounds,
     vehicle,
     obstaclePolygons,
+    context.minimumObstacleClearance,
   );
   const start = approachPrefix ? planningStart : actualStart;
   const prefix = approachPrefix ?? [{ pose: actualStart, direction: 1 as const, steeringAngle: 0 }];
 
   if ((settings.entryMode ?? 'nose-in') === 'nose-in' && alignedForStraightTravel(start, target)) {
-    const straightPath = straightSegment(start, target, spot, corridorBounds, vehicle, obstaclePolygons);
-    if (straightPath && preservesPreferredObstacleClearance(straightPath, vehicle, obstaclePolygons)) {
+    const straightPath = straightSegment(
+      start, target, spot, corridorBounds, vehicle, obstaclePolygons, context.minimumObstacleClearance,
+    );
+    if (straightPath && preservesPreferredObstacleClearance(
+      straightPath, vehicle, obstaclePolygons, context.minimumObstacleClearance,
+    )) {
       return result(
         'viable',
-        `Se encontró una trayectoria recta con al menos ${MANEUVER_CLEARANCE_CM} cm de holgura frente a obstáculos.`,
+        `Se encontró una trayectoria recta con al menos ${context.minimumObstacleClearance} cm de holgura frente a obstáculos.`,
         turningRadius,
         0,
         [...prefix.slice(0, -1), ...straightPath],
@@ -712,7 +727,9 @@ function planEntry(
       y: f.c.y + f.r.y * passS + f.n.y * dStart,
       angle: start.angle,
     };
-    const drive = straightSegment(start, pass, spot, corridorBounds, vehicle, obstaclePolygons);
+    const drive = straightSegment(
+      start, pass, spot, corridorBounds, vehicle, obstaclePolygons, context.minimumObstacleClearance,
+    );
     if (!drive) {
       return result('not-viable', 'No hay espacio para pasar la plaza antes de dar marcha atrás.', turningRadius);
     }
@@ -771,6 +788,7 @@ function searchManeuver(
   obstaclePolygons: readonly Polygon[],
   turningRadius: number,
   maxSteeringAngle: number,
+  minimumObstacleClearance: number,
   resolution: SearchResolution,
   maxExpanded: number,
   expandedOffset: number,
@@ -784,8 +802,8 @@ function searchManeuver(
       goal.estimate?.(pose) ?? 0,
     );
   const footprintRadius = Math.hypot(
-    vehicleWidthForClearance(vehicle) + MANEUVER_CLEARANCE_CM * 2,
-    vehicle.length + MANEUVER_CLEARANCE_CM * 2,
+    vehicleWidthForClearance(vehicle) + minimumObstacleClearance * 2,
+    vehicle.length + minimumObstacleClearance * 2,
   ) / 2;
   const nodes: Node[] = [{
     pose: start,
@@ -810,7 +828,7 @@ function searchManeuver(
       const entryMotion = pathTo(nodes, item.index, maxSteeringAngle);
       return result(
         'viable',
-        `Se encontró una trayectoria con holgura mínima de ${MANEUVER_CLEARANCE_CM} cm y tolerancia final de ${resolution.goalPositionToleranceCm} cm y ${resolution.goalAngleToleranceDeg}°.`,
+        `Se encontró una trayectoria con holgura mínima de ${minimumObstacleClearance} cm y tolerancia final de ${resolution.goalPositionToleranceCm} cm y ${resolution.goalAngleToleranceDeg}°.`,
         turningRadius,
         expandedOffset + expanded,
         entryMotion,
@@ -866,12 +884,16 @@ function searchManeuver(
         footprintRadius,
       );
       const nextPose = trajectory[trajectory.length - 1]!.pose;
-      if (trajectory.some((frame) => !poseAllowed(frame.pose, spot, corridorBounds, vehicle, obstaclePolygons))) continue;
+      if (trajectory.some((frame) => !poseAllowed(
+        frame.pose, spot, corridorBounds, vehicle, obstaclePolygons, minimumObstacleClearance,
+      ))) continue;
       const nextKey = poseKey(nextPose, resolution, current.direction, steeringIndex);
       if (closed.has(nextKey)) continue;
       const sampleDistance = resolution.stepCm / trajectory.length;
       const riskCost = trajectory.reduce(
-        (cost, frame) => cost + clearancePenalty(frame.pose, vehicle, obstaclePolygons, sampleDistance),
+        (cost, frame) => cost + clearancePenalty(
+          frame.pose, vehicle, obstaclePolygons, sampleDistance, minimumObstacleClearance,
+        ),
         0,
       );
       const nextCost = current.cost + resolution.stepCm * (current.direction < 0 ? 1.15 : 1) + riskCost;

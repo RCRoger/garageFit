@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { useFitAnalysis } from '@/hooks/useFitAnalysis';
+import { DEFAULT_OBSTACLE_CLEARANCE_CM } from '@/types/domain';
 import type { FitStatus } from '@/domain/collision/analysis';
 import { useSimulationStore } from '@/stores/simulationStore';
 import { createReportHtml } from '@/features/reports/reportHtml';
@@ -26,7 +27,7 @@ export function ResultsPanel() {
   const reportFrame = useRef<HTMLIFrameElement>(null);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportHtml, setReportHtml] = useState<string | null>(null);
-  const { spot, vehicle, placement, obstacles, maneuverResult } = useSimulationStore();
+  const { spot, vehicle, placement, obstacles, maneuverSettings, maneuverResult } = useSimulationStore();
   const maneuverStatusText = (status: NonNullable<typeof maneuverResult>['status']) =>
     status === 'viable' ? 'viable en el modelo' :
       status === 'not-viable' ? 'sin trayectoria en el modelo' : 'no verificada';
@@ -53,6 +54,7 @@ export function ResultsPanel() {
         obstacles,
         analysis: a,
         maneuver: maneuverResult,
+        maneuverClearanceCm: maneuverSettings.minimumObstacleClearance ?? DEFAULT_OBSTACLE_CLEARANCE_CM,
         imageDataUrl,
       }));
     } catch (error) {
@@ -120,7 +122,7 @@ export function ResultsPanel() {
             Entrada: {maneuverResult.reason} Salida: {maneuverResult.exitReason}
             {maneuverResult.turningRadius !== null && ` Radio mínimo: ${cm(maneuverResult.turningRadius)}.`}
             {maneuverResult.expandedNodes > 0 && ` Estados analizados: ${maneuverResult.expandedNodes}.`}
-            {' '}Modelo geométrico de bicicleta con obstáculos estáticos; no garantiza una maniobra real segura.
+            {' '}Holgura mínima a obstáculos: {maneuverSettings.minimumObstacleClearance ?? DEFAULT_OBSTACLE_CLEARANCE_CM} cm. Modelo geométrico de bicicleta con obstáculos estáticos; no garantiza una maniobra real segura.
           </p>
         )}
       </section>

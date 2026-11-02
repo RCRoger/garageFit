@@ -175,6 +175,14 @@ describe('modelo de maniobra', () => {
     expect(result.status).toBe('not-viable');
     expect(result.reason).toContain('holgura mínima');
   });
+  it('aplica la distancia mínima configurada en lugar del valor predeterminado', () => {
+    const result = planManeuver(spot, vehicle, parked, [
+      { id: 'near-wall', kind: 'wall', shape: 'rect', x: 0, y: 20, width: 10, height: 460 },
+    ], { ...settings, minimumObstacleClearance: 25 });
+
+    expect(result.status).toBe('not-viable');
+    expect(result.reason).toContain('25 cm');
+  });
   it('prefiere más holgura a un paso recto más corto junto a un obstáculo', () => {
     const obstacle = { id: 'near-lane', kind: 'column' as const, shape: 'rect' as const, x: 0, y: 490, width: 10, height: 20 };
     const result = planManeuver(spot, vehicle, parked, [obstacle], settings);
