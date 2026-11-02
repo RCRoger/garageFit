@@ -1,5 +1,5 @@
 import type { FitAnalysis } from '@/domain/collision/analysis';
-import type { ManeuverResult } from '@/domain/maneuver/maneuver';
+import { MANEUVER_CLEARANCE_CM, type ManeuverResult } from '@/domain/maneuver/maneuver';
 import type { Obstacle, ParkingSpot, Placement, VehicleDimensions } from '@/types/domain';
 
 export interface ReportData {
@@ -52,14 +52,17 @@ export function createReportHtml(data: ReportData): string {
     : row('Puertas', 'No configuradas; apertura no verificada');
   const maneuverText = !data.maneuver
     ? 'No verificada: no se ha ejecutado el análisis de maniobra.'
-    : `${data.maneuver.status === 'viable' ? 'Trayectoria viable' : data.maneuver.status === 'not-viable' ? 'Sin trayectoria en el modelo configurado' : 'No verificada'} · ${data.maneuver.reason}`;
+    : `${data.maneuver.status === 'viable' ? 'Trayectoria viable en el modelo' : data.maneuver.status === 'not-viable' ? 'Sin trayectoria en el modelo configurado' : 'No verificada'} · ${data.maneuver.reason}`;
   const warnings = [
+    `La maniobra usa un modelo geométrico de bicicleta, obstáculos estáticos y una holgura mínima de ${MANEUVER_CLEARANCE_CM} cm frente a obstáculos; no garantiza una maniobra real segura.`,
     ...data.analysis.doorResults.filter((door) => door.estimated).map((door) => `Los parámetros de la puerta “${door.label}” son estimados.`),
     ...(data.analysis.doorStatus === 'not-configured' ? ['No hay puertas configuradas; su apertura no está verificada.'] : []),
     ...(data.vehicle.widthMirrorsFolded === null || data.vehicle.widthMirrorsExtended === null
       ? ['La anchura de uno o ambos espejos no está disponible; el encaje utiliza la anchura de carrocería cuando falta la medida plegada.']
       : []),
-    ...(!data.maneuver || data.maneuver.status === 'not-verified' ? ['La maniobrabilidad no está verificada.'] : []),
+    ...(!data.maneuver || data.maneuver.status === 'not-verified' || data.maneuver.exitStatus === 'not-verified'
+      ? ['La maniobrabilidad no está verificada por completo.']
+      : []),
     ...(data.analysis.status === 'limited' ? ['El encaje presenta limitaciones; revisar márgenes, obstáculos y apertura de puertas.'] : []),
     ...(data.analysis.status === 'collision' ? ['La huella del vehículo sobresale de la plaza o colisiona con un obstáculo.'] : []),
   ];
@@ -101,6 +104,6 @@ ${row('Distancia mínima a obstáculos', cm(data.analysis.minObstacleDistance))}
 <h2>Maniobrabilidad</h2><table>${row('Resultado', maneuverText)}${data.maneuver?.turningRadius !== null && data.maneuver?.turningRadius !== undefined ? row('Radio mínimo', cm(data.maneuver.turningRadius)) : ''}${data.maneuver?.status === 'viable' ? row('Trayectoria de entrada', `${data.maneuver.entryPath.length} poses`) : ''}${data.maneuver ? row('Salida', `${data.maneuver.exitStatus === 'viable' ? `Viable · ${data.maneuver.exitPath.length} poses` : data.maneuver.exitStatus === 'not-viable' ? 'Sin trayectoria en el modelo configurado' : 'No verificada'} · ${data.maneuver.exitReason}`) : ''}</table>
 <h2>Advertencias</h2>${warnings.length ? `<ul>${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join('')}</ul>` : '<p>Ninguna.</p>'}
 <h2>Conclusión</h2><p class="summary">${escapeHtml(conclusion)}</p>
-<p class="muted">Este informe describe el modelo geométrico y los datos introducidos; no sustituye una comprobación física en el lugar.</p>
+<p class="muted">La entrada y la salida se planifican por separado. Este informe describe el modelo geométrico y los datos introducidos; no sustituye una comprobación física en el lugar ni sirve como guía de conducción.</p>
 </body></html>`;
 }

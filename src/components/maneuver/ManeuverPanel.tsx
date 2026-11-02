@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { parkedAngle, planManeuver } from '@/domain/maneuver/maneuver';
+import { MANEUVER_CLEARANCE_CM, parkedAngle, planManeuver } from '@/domain/maneuver/maneuver';
 import { ManeuverSettingsSchema, ParkingSpotSchema, VehicleDimensionsSchema, ObstacleSchema } from '@/types/domain';
 import { useSimulationStore } from '@/stores/simulationStore';
 import { NumberField } from '@/components/layout/NumberField';
@@ -40,7 +40,7 @@ export function ManeuverPanel() {
     <section className="space-y-2 border-b border-slate-200 pb-4">
       <h2 className="text-sm font-semibold">Maniobrabilidad</h2>
       <p className="text-xs text-slate-500">
-        Modelo bicicleta, maniobra en pasos y obstáculos estáticos. La entrada y la salida se planifican por separado.
+        Modelo geométrico de bicicleta y obstáculos estáticos. Exige {MANEUVER_CLEARANCE_CM} cm de holgura frente a obstáculos y prioriza más margen frente a una ruta corta. No es una guía de conducción real.
       </p>
       <div className="grid grid-cols-2 gap-2">
         <NumberField

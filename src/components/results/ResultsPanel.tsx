@@ -27,6 +27,11 @@ export function ResultsPanel() {
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportHtml, setReportHtml] = useState<string | null>(null);
   const { spot, vehicle, placement, obstacles, maneuverResult } = useSimulationStore();
+  const maneuverStatusText = (status: NonNullable<typeof maneuverResult>['status']) =>
+    status === 'viable' ? 'viable en el modelo' :
+      status === 'not-viable' ? 'sin trayectoria en el modelo' : 'no verificada';
+  const maneuverFullyViable = maneuverResult?.status === 'viable' && maneuverResult.exitStatus === 'viable';
+  const maneuverHasNoPath = maneuverResult?.status === 'not-viable' || maneuverResult?.exitStatus === 'not-viable';
   if (!a) {
     return (
       <div className="p-4 text-sm text-red-700">
@@ -101,22 +106,21 @@ export function ResultsPanel() {
           </p>
         ))}
         <p className={`rounded p-2 ${
-          maneuverResult?.status === 'viable' ? 'bg-emerald-100 text-emerald-900' :
-            maneuverResult?.status === 'not-viable' ? 'bg-red-50 text-red-800' : 'bg-slate-100'
+          maneuverFullyViable ? 'bg-emerald-100 text-emerald-900' :
+            maneuverHasNoPath ? 'bg-red-50 text-red-800' : 'bg-slate-100'
         }`}>
           3. Entrada y salida:{' '}
           <b>
             {!maneuverResult ? 'no verificada' :
-              maneuverResult.status === 'viable' ? 'trayectoria viable' :
-                maneuverResult.status === 'not-viable' ? 'sin trayectoria en el modelo configurado' : 'no verificada'}
+              `entrada ${maneuverStatusText(maneuverResult.status)} · salida ${maneuverStatusText(maneuverResult.exitStatus)}`}
           </b>
         </p>
         {maneuverResult && (
           <p className="rounded bg-slate-50 p-2 text-xs text-slate-600">
-            {maneuverResult.reason}
+            Entrada: {maneuverResult.reason} Salida: {maneuverResult.exitReason}
             {maneuverResult.turningRadius !== null && ` Radio mínimo: ${cm(maneuverResult.turningRadius)}.`}
-            {maneuverResult.status !== 'not-verified' && ` Estados analizados: ${maneuverResult.expandedNodes}.`}
-            {maneuverResult.status === 'viable' && ' Modelo reversible con obstáculos estáticos; salida = trayectoria inversa de entrada.'}
+            {maneuverResult.expandedNodes > 0 && ` Estados analizados: ${maneuverResult.expandedNodes}.`}
+            {' '}Modelo geométrico de bicicleta con obstáculos estáticos; no garantiza una maniobra real segura.
           </p>
         )}
       </section>

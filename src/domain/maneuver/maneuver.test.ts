@@ -1,4 +1,6 @@
 ﻿import { describe, expect, it } from 'vitest';
+import { polygonDistance } from '../collision/collision';
+import { obstaclePolygon, vehicleFootprint } from '../collision/analysis';
 import {
   angleDifference,
   approachCorridor,
@@ -50,8 +52,8 @@ describe('modelo de maniobra', () => {
       turningDiameter: 980,
       doors: [],
     };
-    const tightSpot: ParkingSpot = { width: 250, length: 400, kind: 'individual', entrance: 'bottom' };
-    const target = { x: 151.5, y: 198.95, angle: 0 };
+    const tightSpot: ParkingSpot = { width: 250, length: 420, kind: 'individual', entrance: 'bottom' };
+    const target = { x: 151.5, y: 210.85, angle: 0 };
     const result = planManeuver(tightSpot, fiesta, target, [], settings);
 
     expect(result.status).toBe('viable');
@@ -72,8 +74,8 @@ describe('modelo de maniobra', () => {
       turningDiameter: 980,
       doors: [],
     };
-    const tightSpot: ParkingSpot = { width: 250, length: 400, kind: 'individual', entrance: 'bottom' };
-    const target = { x: 151.5, y: 198.95, angle: 0 };
+    const tightSpot: ParkingSpot = { width: 250, length: 420, kind: 'individual', entrance: 'bottom' };
+    const target = { x: 151.5, y: 210.85, angle: 0 };
     const result = planManeuver(tightSpot, fiesta, target, [], settings);
     const maxSteeringAngle = Math.atan(fiesta.wheelbase / (fiesta.turningDiameter! / 2)) * (180 / Math.PI);
 
@@ -164,6 +166,40 @@ describe('modelo de maniobra', () => {
     ], settings);
     expect(result.status).toBe('not-viable');
     expect(result.reason).toContain('posición final');
+  });
+  it('rechaza objetivos con menos de 10 cm de holgura frente a obstáculos', () => {
+    const result = planManeuver(spot, vehicle, parked, [
+      { id: 'close-wall', kind: 'wall', shape: 'rect', x: 20, y: 20, width: 5, height: 460 },
+    ], settings);
+
+    expect(result.status).toBe('not-viable');
+    expect(result.reason).toContain('holgura mínima');
+  });
+  it('prefiere más holgura a un paso recto más corto junto a un obstáculo', () => {
+    const obstacle = { id: 'near-lane', kind: 'column' as const, shape: 'rect' as const, x: 0, y: 490, width: 10, height: 20 };
+    const result = planManeuver(spot, vehicle, parked, [obstacle], settings);
+    const obstacleShape = obstaclePolygon(obstacle);
+    const clearances = result.entryMotion
+      .filter(({ pose }) => pose.y >= 400 && pose.y <= 600)
+      .map(({ pose }) => polygonDistance(vehicleFootprint(vehicle, pose), obstacleShape));
+
+    expect(result.status).toBe('viable');
+    expect(clearances.length).toBeGreaterThan(0);
+    expect(Math.min(...clearances)).toBeGreaterThan(20);
+  });
+  it('limita el desplazamiento de cualquier punto de la carrocería entre muestras', () => {
+    const result = planManeuver(spot, vehicle, parked, [], settings);
+    const cornerRadius = Math.hypot(vehicle.widthMirrorsFolded!, vehicle.length) / 2;
+
+    expect(result.status).toBe('viable');
+    for (let index = 1; index < result.entryMotion.length; index++) {
+      const previous = result.entryMotion[index - 1]!;
+      const current = result.entryMotion[index]!;
+      const centerTravel = Math.hypot(current.pose.x - previous.pose.x, current.pose.y - previous.pose.y);
+      const rotationTravel = (angleDifference(current.pose.angle, previous.pose.angle) * Math.PI * cornerRadius) / 180;
+
+      expect(centerTravel + rotationTravel).toBeLessThanOrEqual(10 + 1e-7);
+    }
   });
   it('define las cuatro zonas de acceso en el lado seleccionado', () => {
     expect(Math.min(...approachCorridor(spot, 'left', settings).map((point) => point.x))).toBe(-600);

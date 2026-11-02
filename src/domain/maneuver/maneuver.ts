@@ -1,6 +1,6 @@
-﻿import { polygonsIntersect } from '../collision/collision';
+import { polygonDistance, polygonsIntersect } from '../collision/collision';
 import { axisRect, orientedRect, type Polygon } from '../geometry/polygon';
-import { degToRad, length, sub, vec } from '../geometry/vec';
+import { degToRad, vec } from '../geometry/vec';
 import { obstaclePolygon, vehicleWidthForClearance } from '../collision/analysis';
 import type { Obstacle, ParkingSpot, Placement, VehicleDimensions } from '@/types/domain';
 
@@ -58,7 +58,7 @@ interface SearchGoal {
   reached: (pose: Placement, steeringIndex: number, resolution: SearchResolution) => boolean;
   /** Extra lower-bound hint combined with the default heuristic. */
   estimate?: (pose: Placement) => number;
-  /** Greedy weight applied to the heuristic; larger values trade optimality for speed. */
+  /** Larger weights reduce search time but can trade some optimality. */
   weight?: number;
 }
 
@@ -68,6 +68,7 @@ interface Node {
   parent: number;
   direction: -1 | 1;
   steeringIndex: number;
+  motionFromParent: ManeuverMotionFrame[];
 }
 
 interface QueueItem {
@@ -76,6 +77,9 @@ interface QueueItem {
 }
 
 const COLLISION_STEP_CM = 10;
+export const MANEUVER_CLEARANCE_CM = 10;
+const PREFERRED_OBSTACLE_CLEARANCE_CM = 30;
+const CLEARANCE_COST_WEIGHT = 2;
 const STEERING_LEVELS = [-1, -0.5, 0, 0.5, 1] as const;
 const STEERING_SHIFT_PER_PRIMITIVE = 1;
 const GEAR_CHANGE_COST_CM = 60;
@@ -220,6 +224,47 @@ function footprint(v: VehicleDimensions, pose: Placement): Polygon {
   return orientedRect(vec(pose.x, pose.y), vehicleWidthForClearance(v), v.length, pose.angle);
 }
 
+function segmentInsideDomain(
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  spot: ParkingSpot,
+  corridorBounds: readonly Rect[],
+): boolean {
+  const domainRects = [
+    { minX: 0, minY: 0, maxX: spot.width, maxY: spot.length },
+    ...corridorBounds,
+  ];
+  const deltaX = end.x - start.x;
+  const deltaY = end.y - start.y;
+  const breakpoints = [0, 1];
+  for (const rect of domainRects) {
+    if (deltaX !== 0) {
+      for (const x of [rect.minX, rect.maxX]) {
+        const t = (x - start.x) / deltaX;
+        if (t > 0 && t < 1) breakpoints.push(t);
+      }
+    }
+    if (deltaY !== 0) {
+      for (const y of [rect.minY, rect.maxY]) {
+        const t = (y - start.y) / deltaY;
+        if (t > 0 && t < 1) breakpoints.push(t);
+      }
+    }
+  }
+  breakpoints.sort((a, b) => a - b);
+  const inside = (t: number) => pointOnPathInsideDomain(
+    { x: start.x + deltaX * t, y: start.y + deltaY * t },
+    spot,
+    corridorBounds,
+  );
+  for (let index = 0; index < breakpoints.length; index++) {
+    if (!inside(breakpoints[index]!)) return false;
+    const next = breakpoints[index + 1];
+    if (next !== undefined && !inside((breakpoints[index]! + next) / 2)) return false;
+  }
+  return true;
+}
+
 function poseAllowed(
   pose: Placement,
   spot: ParkingSpot,
@@ -228,42 +273,41 @@ function poseAllowed(
   obstacles: readonly Polygon[],
 ): boolean {
   const car = footprint(vehicle, pose);
+  const clearance = MANEUVER_CLEARANCE_CM;
+  const clearanceFootprint = orientedRect(
+    vec(pose.x, pose.y),
+    vehicleWidthForClearance(vehicle) + clearance * 2,
+    vehicle.length + clearance * 2,
+    pose.angle,
+  );
   for (const obstacle of obstacles) {
-    if (polygonsIntersect(car, obstacle)) return false;
+    if (polygonsIntersect(clearanceFootprint, obstacle)) return false;
   }
 
-  // Sample the perimeter so a footprint cannot cross the concave seam of the joined bay and corridor.
   for (let i = 0; i < car.length; i++) {
     const start = car[i]!;
     const end = car[(i + 1) % car.length]!;
-    const edgeLength = length(sub(end, start));
-    const steps = Math.max(1, Math.ceil(edgeLength / COLLISION_STEP_CM));
-    for (let step = 0; step <= steps; step++) {
-      const t = step / steps;
-      if (!pointOnPathInsideDomain(
-        { x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t },
-        spot,
-        corridorBounds,
-      )) return false;
-    }
+    if (!segmentInsideDomain(start, end, spot, corridorBounds)) return false;
   }
   return true;
 }
 
 function integrate(
   pose: Placement,
-  direction: number,
+  direction: -1 | 1,
   fromSteeringAngle: number,
   toSteeringAngle: number,
   wheelbase: number,
   distance: number,
-): Placement[] {
-  const steps = Math.max(1, Math.ceil(distance / COLLISION_STEP_CM));
+  footprintRadius: number,
+): ManeuverMotionFrame[] {
+  const maxCurvature = Math.max(Math.abs(Math.tan(fromSteeringAngle)), Math.abs(Math.tan(toSteeringAngle))) / wheelbase;
+  const steps = Math.max(1, Math.ceil((distance * (1 + footprintRadius * maxCurvature)) / COLLISION_STEP_CM));
   const ds = (distance * direction) / steps;
   let x = pose.x;
   let y = pose.y;
   let angle = pose.angle;
-  const trajectory: Placement[] = [];
+  const trajectory: ManeuverMotionFrame[] = [];
   for (let step = 0; step < steps; step++) {
     const steeringProgress = (step + 1) / steps;
     const steeringAngle = fromSteeringAngle + (toSteeringAngle - fromSteeringAngle) * steeringProgress;
@@ -272,7 +316,11 @@ function integrate(
     y -= Math.cos(radians) * ds;
     const curvature = Math.tan(steeringAngle) / wheelbase;
     angle = normalizeAngle(angle + (curvature * ds * 180) / Math.PI);
-    trajectory.push({ x, y, angle });
+    trajectory.push({
+      pose: { x, y, angle },
+      direction,
+      steeringAngle,
+    });
   }
   return trajectory;
 }
@@ -305,6 +353,31 @@ function heuristic(
   return Math.max(distance, turning, steering);
 }
 
+function clearancePenalty(
+  pose: Placement,
+  vehicle: VehicleDimensions,
+  obstacles: readonly Polygon[],
+  distance: number,
+): number {
+  if (obstacles.length === 0) return 0;
+  const car = footprint(vehicle, pose);
+  const clearance = Math.min(...obstacles.map((obstacle) => polygonDistance(car, obstacle)));
+  const risk = Math.max(0, (PREFERRED_OBSTACLE_CLEARANCE_CM - clearance) / PREFERRED_OBSTACLE_CLEARANCE_CM);
+  return distance * risk * CLEARANCE_COST_WEIGHT;
+}
+
+function preservesPreferredObstacleClearance(
+  path: readonly ManeuverMotionFrame[],
+  vehicle: VehicleDimensions,
+  obstacles: readonly Polygon[],
+): boolean {
+  return path.every(({ pose }) => {
+    const car = footprint(vehicle, pose);
+    return obstacles.every((obstacle) =>
+      polygonDistance(car, obstacle) >= PREFERRED_OBSTACLE_CLEARANCE_CM);
+  });
+}
+
 function startPose(
   spot: ParkingSpot,
   settings: ManeuverSettings,
@@ -322,7 +395,8 @@ function startPose(
       angle: f.angle,
     };
   }
-  const s = (side === 'left' ? -1 : 1) * (f.halfEdge + approachLength - vehicleLength / 2);
+  const s = (side === 'left' ? -1 : 1) *
+    (f.halfEdge + approachLength - vehicleLength / 2);
   const d = settings.corridorWidth / 2 + offset;
   return {
     x: f.c.x + f.r.x * s + f.n.x * d,
@@ -420,18 +494,19 @@ function alignedForStraightTravel(from: Placement, to: Placement): boolean {
 }
 
 function pathTo(nodes: readonly Node[], goalIndex: number, maxSteeringAngle: number): ManeuverMotionFrame[] {
-  const result: ManeuverMotionFrame[] = [];
+  const transitions: ManeuverMotionFrame[][] = [];
   let index = goalIndex;
-  while (index >= 0) {
+  while (nodes[index]!.parent >= 0) {
     const node = nodes[index]!;
-    result.push({
-      pose: node.pose,
-      direction: node.direction,
-      steeringAngle: STEERING_LEVELS[node.steeringIndex + 2]! * maxSteeringAngle,
-    });
+    transitions.push(node.motionFromParent);
     index = node.parent;
   }
-  return result.reverse();
+  const start = nodes[index]!;
+  return [{
+    pose: start.pose,
+    direction: start.direction,
+    steeringAngle: STEERING_LEVELS[start.steeringIndex + 2]! * maxSteeringAngle,
+  }, ...transitions.reverse().flat()];
 }
 
 function result(
@@ -516,7 +591,7 @@ function searchWithRefinement(
   }
   return result(
     'not-viable',
-    `No se encontró una trayectoria tras agotar la búsqueda gruesa y refinada (${SEARCH_RESOLUTIONS[1].stepCm} cm, ${SEARCH_RESOLUTIONS[1].positionBinCm} cm/${SEARCH_RESOLUTIONS[1].angleBinDeg}°).`,
+    `No se encontró una trayectoria con al menos ${MANEUVER_CLEARANCE_CM} cm de holgura tras agotar la búsqueda gruesa y refinada (${SEARCH_RESOLUTIONS[1].stepCm} cm, ${SEARCH_RESOLUTIONS[1].positionBinCm} cm/${SEARCH_RESOLUTIONS[1].angleBinDeg}°).`,
     context.turningRadius,
     expandedNodes,
   );
@@ -551,10 +626,10 @@ export function planManeuver(
   };
 
   if (!poseAllowed(actualStart, spot, corridorBounds, vehicle, obstaclePolygons)) {
-    return result('not-viable', 'El vehículo no cabe en la zona de aproximación configurada.', turningRadius);
+    return result('not-viable', `El vehículo no cabe con ${MANEUVER_CLEARANCE_CM} cm de holgura en la zona de aproximación configurada.`, turningRadius);
   }
   if (!poseAllowed(target, spot, corridorBounds, vehicle, obstaclePolygons)) {
-    return result('not-viable', 'La posición final del vehículo colisiona o sale del área modelada.', turningRadius);
+    return result('not-viable', `La posición final colisiona, no conserva la holgura mínima de ${MANEUVER_CLEARANCE_CM} cm o sale del área modelada.`, turningRadius);
   }
 
   const entry = planEntry(context, settings, actualStart, target, maxExpanded);
@@ -615,17 +690,16 @@ function planEntry(
 
   if ((settings.entryMode ?? 'nose-in') === 'nose-in' && alignedForStraightTravel(start, target)) {
     const straightPath = straightSegment(start, target, spot, corridorBounds, vehicle, obstaclePolygons);
-    if (straightPath) {
+    if (straightPath && preservesPreferredObstacleClearance(straightPath, vehicle, obstaclePolygons)) {
       return result(
         'viable',
-        'Se encontró una trayectoria recta libre hasta la posición final.',
+        `Se encontró una trayectoria recta con al menos ${MANEUVER_CLEARANCE_CM} cm de holgura frente a obstáculos.`,
         turningRadius,
         0,
         [...prefix.slice(0, -1), ...straightPath],
       );
     }
   }
-
   const lateral = (settings.arrivalSide ?? 'straight') !== 'straight';
   if (settings.entryMode === 'tail-in' && lateral) {
     // Pass the spot, stop, then back in with the tail swinging into the bay.
@@ -709,7 +783,18 @@ function searchManeuver(
       heuristic(pose, target, turningRadius, steeringIndex, resolution.stepCm),
       goal.estimate?.(pose) ?? 0,
     );
-  const nodes: Node[] = [{ pose: start, cost: 0, parent: -1, direction: initialDirection, steeringIndex: 0 }];
+  const footprintRadius = Math.hypot(
+    vehicleWidthForClearance(vehicle) + MANEUVER_CLEARANCE_CM * 2,
+    vehicle.length + MANEUVER_CLEARANCE_CM * 2,
+  ) / 2;
+  const nodes: Node[] = [{
+    pose: start,
+    cost: 0,
+    parent: -1,
+    direction: initialDirection,
+    steeringIndex: 0,
+    motionFromParent: [],
+  }];
   const open = new MinHeap();
   open.push({ index: 0, priority: estimateFor(start, 0) });
   const bestCost = new Map<string, number>([[poseKey(start, resolution, initialDirection, 0), 0]]);
@@ -725,7 +810,7 @@ function searchManeuver(
       const entryMotion = pathTo(nodes, item.index, maxSteeringAngle);
       return result(
         'viable',
-        `Se encontró una trayectoria con tolerancia final de ${resolution.goalPositionToleranceCm} cm y ${resolution.goalAngleToleranceDeg}°.`,
+        `Se encontró una trayectoria con holgura mínima de ${MANEUVER_CLEARANCE_CM} cm y tolerancia final de ${resolution.goalPositionToleranceCm} cm y ${resolution.goalAngleToleranceDeg}°.`,
         turningRadius,
         expandedOffset + expanded,
         entryMotion,
@@ -742,6 +827,7 @@ function searchManeuver(
     closed.add(key);
     expanded++;
 
+    const currentSteeringAngle = STEERING_LEVELS[current.steeringIndex + 2]! * maxSteeringAngle;
     const shiftedDirection = current.direction === 1 ? -1 : 1;
     const shiftedKey = poseKey(current.pose, resolution, shiftedDirection, current.steeringIndex);
     const shiftCost = current.cost + GEAR_CHANGE_COST_CM;
@@ -753,6 +839,11 @@ function searchManeuver(
         parent: item.index,
         direction: shiftedDirection,
         steeringIndex: current.steeringIndex,
+        motionFromParent: [{
+          pose: current.pose,
+          direction: shiftedDirection,
+          steeringAngle: currentSteeringAngle,
+        }],
       }) - 1;
       open.push({
         index: shiftedIndex,
@@ -760,7 +851,6 @@ function searchManeuver(
       });
     }
 
-    const currentSteeringAngle = STEERING_LEVELS[current.steeringIndex + 2]! * maxSteeringAngle;
     const firstSteeringIndex = Math.max(-2, current.steeringIndex - STEERING_SHIFT_PER_PRIMITIVE);
     const lastSteeringIndex = Math.min(2, current.steeringIndex + STEERING_SHIFT_PER_PRIMITIVE);
     for (const steeringIndex of Array.from({ length: lastSteeringIndex - firstSteeringIndex + 1 }, (_, index) =>
@@ -773,12 +863,18 @@ function searchManeuver(
         steeringAngle * maxSteeringAngle,
         vehicle.wheelbase,
         resolution.stepCm,
+        footprintRadius,
       );
-      const nextPose = trajectory[trajectory.length - 1]!;
-      if (trajectory.some((pose) => !poseAllowed(pose, spot, corridorBounds, vehicle, obstaclePolygons))) continue;
+      const nextPose = trajectory[trajectory.length - 1]!.pose;
+      if (trajectory.some((frame) => !poseAllowed(frame.pose, spot, corridorBounds, vehicle, obstaclePolygons))) continue;
       const nextKey = poseKey(nextPose, resolution, current.direction, steeringIndex);
       if (closed.has(nextKey)) continue;
-      const nextCost = current.cost + resolution.stepCm * (current.direction < 0 ? 1.15 : 1);
+      const sampleDistance = resolution.stepCm / trajectory.length;
+      const riskCost = trajectory.reduce(
+        (cost, frame) => cost + clearancePenalty(frame.pose, vehicle, obstaclePolygons, sampleDistance),
+        0,
+      );
+      const nextCost = current.cost + resolution.stepCm * (current.direction < 0 ? 1.15 : 1) + riskCost;
       if (nextCost >= (bestCost.get(nextKey) ?? Infinity)) continue;
       bestCost.set(nextKey, nextCost);
       const nextIndex = nodes.push({
@@ -787,6 +883,7 @@ function searchManeuver(
         parent: item.index,
         direction: current.direction,
         steeringIndex,
+        motionFromParent: trajectory,
       }) - 1;
       open.push({ index: nextIndex, priority: nextCost + estimateFor(nextPose, steeringIndex) });
     }

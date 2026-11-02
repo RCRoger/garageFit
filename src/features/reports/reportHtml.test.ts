@@ -32,6 +32,11 @@ describe('informe imprimible', () => {
     expect(html).toContain('250 × 500 cm');
     expect(html).toContain('30.0 cm');
     expect(html).toContain('No verificada: no se ha ejecutado el análisis de maniobra');
+    expect(html).toContain('modelo geométrico de bicicleta');
+    expect(html).toContain('holgura mínima de 10 cm');
+    expect(html).toContain('no garantiza una maniobra real segura');
+    expect(html).toContain('La maniobrabilidad no está verificada por completo');
+    expect(html).toContain('entrada y la salida se planifican por separado');
     expect(html).toContain('No configuradas; apertura no verificada');
     expect(html).toContain('No se pudo capturar la imagen');
   });
