@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Arrow, Circle, Group, Layer, Line, Rect, Stage, Text } from 'react-konva';
 import type Konva from 'konva';
 import { useSimulationStore } from '@/stores/simulationStore';
 import { useFitAnalysis } from '@/hooks/useFitAnalysis';
 import type { Obstacle } from '@/types/domain';
-import { approachCorridor } from '@/domain/maneuver/maneuver';
+import { approachCorridor, interpolateTrajectory } from '@/domain/maneuver/maneuver';
 import { vehicleWidthForClearance } from '@/domain/collision/analysis';
 
 const PAD = 64;
@@ -23,15 +23,80 @@ function obstacleWithPosition(obstacle: Obstacle, x: number, y: number): Obstacl
 export function SimulatorCanvas() {
   const ref = useRef<HTMLDivElement>(null);
   const panGesture = useRef<PanGesture | null>(null);
+  const playbackProgressRef = useRef(0);
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [panning, setPanning] = useState(false);
+  const [playbackDirection, setPlaybackDirection] = useState<'entry' | 'exit'>('entry');
+  const [playbackProgress, setPlaybackProgress] = useState(0);
+  const [previewActive, setPreviewActive] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
   const {
     spot, vehicle, placement, obstacles, maneuverSettings, maneuverResult, showGrid, showDimensions, snapToGrid, gridSize,
     setPlacement, updateObstacle, setView,
   } = useSimulationStore();
   const analysis = useFitAnalysis();
+  const playbackPath = maneuverResult?.status === 'viable'
+    ? playbackDirection === 'entry' ? maneuverResult.entryPath : maneuverResult.exitPath
+    : [];
+  playbackProgressRef.current = playbackProgress;
+  const playbackDistance = useMemo(() => playbackPath.slice(1).reduce((distance, pose, index) =>
+    distance + Math.hypot(pose.x - playbackPath[index]!.x, pose.y - playbackPath[index]!.y), 0), [playbackPath]);
+  const playbackDuration = Math.max(1400, Math.min(12000, playbackDistance * 8));
+  const animatedPlacement = previewActive
+    ? interpolateTrajectory(playbackPath, playbackProgress) ?? placement
+    : placement;
+  let remainingPlaybackDistance = playbackProgress * playbackDistance;
+  let activePathIndex = 0;
+  while (activePathIndex < playbackPath.length - 1) {
+    const from = playbackPath[activePathIndex]!;
+    const to = playbackPath[activePathIndex + 1]!;
+    const segmentDistance = Math.hypot(to.x - from.x, to.y - from.y);
+    if (remainingPlaybackDistance <= segmentDistance) break;
+    remainingPlaybackDistance -= segmentDistance;
+    activePathIndex++;
+  }
+  const traveledPath = previewActive
+    ? [...playbackPath.slice(0, activePathIndex + 1), animatedPlacement]
+    : [];
+
+  useEffect(() => {
+    setPlaybackProgress(0);
+    setPreviewActive(false);
+    setIsPlaying(false);
+  }, [maneuverResult]);
+
+  useEffect(() => {
+    const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const updatePreference = () => {
+      setReducedMotion(preference.matches);
+      if (preference.matches) setIsPlaying(false);
+    };
+    updatePreference();
+    preference.addEventListener('change', updatePreference);
+    return () => preference.removeEventListener('change', updatePreference);
+  }, []);
+
+  useEffect(() => {
+    if (!isPlaying || reducedMotion || playbackPath.length < 2) return;
+    let startedAt: number | undefined;
+    let frame = 0;
+    const startProgress = playbackProgressRef.current;
+    const animate = (now: number) => {
+      startedAt ??= now;
+      const progress = Math.min(1, startProgress + (now - startedAt) / playbackDuration);
+      setPlaybackProgress(progress);
+      if (progress >= 1) {
+        setIsPlaying(false);
+      } else {
+        frame = window.requestAnimationFrame(animate);
+      }
+    };
+    frame = window.requestAnimationFrame(animate);
+    return () => window.cancelAnimationFrame(frame);
+  }, [isPlaying, playbackDuration, playbackPath.length, reducedMotion]);
 
   useEffect(() => {
     const el = ref.current;
@@ -135,6 +200,90 @@ export function SimulatorCanvas() {
           className={`rounded px-2 py-1 text-xs ${showDimensions ? 'bg-slate-100' : ''}`}
         >Cotas</button>
       </div>
+      {playbackPath.length > 1 && (
+        <div className="absolute bottom-10 left-3 z-10 w-[min(320px,90%)] rounded border border-slate-200 bg-white/95 p-3 shadow-sm">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex rounded border border-slate-200 p-0.5" role="group" aria-label="Dirección de la maniobra">
+              <button
+                type="button"
+                aria-pressed={playbackDirection === 'entry'}
+                onClick={() => {
+                  setPlaybackDirection('entry');
+                  setPlaybackProgress(0);
+                  setPreviewActive(false);
+                  setIsPlaying(false);
+                }}
+                className={`rounded px-2 py-1 text-xs ${playbackDirection === 'entry' ? 'bg-[#202a27] text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+              >Entrada</button>
+              <button
+                type="button"
+                aria-pressed={playbackDirection === 'exit'}
+                onClick={() => {
+                  setPlaybackDirection('exit');
+                  setPlaybackProgress(0);
+                  setPreviewActive(false);
+                  setIsPlaying(false);
+                }}
+                className={`rounded px-2 py-1 text-xs ${playbackDirection === 'exit' ? 'bg-[#202a27] text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+              >Salida</button>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                aria-label={isPlaying ? 'Pausar trayectoria' : 'Reproducir trayectoria'}
+                onClick={() => {
+                  if (isPlaying) {
+                    setIsPlaying(false);
+                    return;
+                  }
+                  if (playbackProgress >= 1) setPlaybackProgress(0);
+                  setPreviewActive(true);
+                  setIsPlaying(true);
+                }}
+                disabled={reducedMotion}
+                className="rounded bg-[#286b55] px-2 py-1 text-xs font-medium text-white hover:bg-[#205742] disabled:cursor-not-allowed disabled:opacity-50"
+              >{isPlaying ? 'Pausar' : 'Reproducir'}</button>
+              <button
+                type="button"
+                aria-label="Restablecer trayectoria"
+                onClick={() => {
+                  setIsPlaying(false);
+                  setPlaybackProgress(0);
+                  setPreviewActive(false);
+                }}
+                className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
+              >Inicio</button>
+            </div>
+          </div>
+          <label className="mt-2 block">
+            <span className="sr-only">Progreso de {playbackDirection === 'entry' ? 'entrada' : 'salida'}</span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={Math.round(playbackProgress * 100)}
+              aria-valuetext={`${Math.round(playbackProgress * 100)} %`}
+              onChange={(event) => {
+                setIsPlaying(false);
+                setPreviewActive(true);
+                setPlaybackProgress(Number(event.target.value) / 100);
+              }}
+              className="w-full accent-[#286b55]"
+            />
+          </label>
+          <div className="flex justify-between text-[10px] text-slate-500">
+            <span>{playbackDirection === 'entry' ? 'Pasillo' : 'Plaza'}</span>
+            <span>{Math.round(playbackProgress * 100)} %</span>
+            <span>{playbackDirection === 'entry' ? 'Plaza' : 'Pasillo'}</span>
+          </div>
+          {reducedMotion && (
+            <p role="status" className="mt-1 text-[10px] text-slate-500">
+              Movimiento reducido: recorre la ruta con el control de progreso.
+            </p>
+          )}
+        </div>
+      )}
       <div className="pointer-events-none absolute bottom-2 left-3 z-10 rounded bg-white/90 px-2 py-1 text-[11px] text-slate-500">
         Rueda: zoom · Mayús + arrastrar: desplazar · Arrastra el coche o los obstáculos
       </div>
@@ -275,11 +424,11 @@ export function SimulatorCanvas() {
             </>
           )}
 
-          {maneuverResult?.status === 'viable' && maneuverResult.entryPath.length > 1 && (
+          {playbackPath.length > 1 && (
             <Arrow
-              points={maneuverResult.entryPath.flatMap((pose) => [pose.x, pose.y])}
-              stroke="#059669"
-              fill="#059669"
+              points={playbackPath.flatMap((pose) => [pose.x, pose.y])}
+              stroke={playbackDirection === 'entry' ? '#059669' : '#b7791f'}
+              fill={playbackDirection === 'entry' ? '#059669' : '#b7791f'}
               strokeWidth={3 / scale}
               pointerLength={12 / scale}
               pointerWidth={10 / scale}
@@ -287,12 +436,34 @@ export function SimulatorCanvas() {
               listening={false}
             />
           )}
+          {previewActive && traveledPath.length > 1 && (
+            <Line
+              points={traveledPath.flatMap((pose) => [pose.x, pose.y])}
+              stroke={playbackDirection === 'entry' ? '#047857' : '#92400e'}
+              strokeWidth={5 / scale}
+              lineCap="round"
+              lineJoin="round"
+              listening={false}
+            />
+          )}
+          {previewActive && playbackDirection === 'entry' && (
+            <Group x={placement.x} y={placement.y} rotation={placement.angle} listening={false}>
+              <Line
+                points={bodyShape}
+                closed
+                fill="rgba(5, 150, 105, 0.06)"
+                stroke="#059669"
+                strokeWidth={2 / scale}
+                dash={[6 / scale, 4 / scale]}
+              />
+            </Group>
+          )}
 
           <Group
-            x={placement.x}
-            y={placement.y}
-            rotation={placement.angle}
-            draggable
+            x={animatedPlacement.x}
+            y={animatedPlacement.y}
+            rotation={animatedPlacement.angle}
+            draggable={!previewActive}
             onDragMove={(e) => {
               e.target.x(snap(e.target.x()));
               e.target.y(snap(e.target.y()));
