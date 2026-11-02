@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { planManeuver, angleDifference, approachCorridor, interpolateTrajectory } from './maneuver';
+import {
+  angleDifference,
+  approachCorridor,
+  createManeuverMotionTimeline,
+  interpolateTrajectory,
+  planManeuver,
+  sampleManeuverMotion,
+} from './maneuver';
 import type { ParkingSpot, VehicleDimensions } from '@/types/domain';
 
 const spot: ParkingSpot = { width: 250, length: 500, kind: 'individual', entrance: 'bottom' };
@@ -51,6 +58,62 @@ describe('modelo de maniobra', () => {
     expect(Math.hypot(end.x - target.x, end.y - target.y)).toBeLessThanOrEqual(5);
     expect(angleDifference(end.angle, target.angle)).toBeLessThanOrEqual(2);
     expect(result.exitPath).toEqual([...result.entryPath].reverse());
+  });
+  it('modela el giro progresivo de las ruedas y centra la dirección al aparcar', () => {
+    const fiesta: VehicleDimensions = {
+      length: 391.7,
+      bodyWidth: 168.4,
+      widthMirrorsFolded: 168.4,
+      widthMirrorsExtended: 175.4,
+      height: 143.3,
+      wheelbase: 248.7,
+      turningDiameter: 980,
+      doors: [],
+    };
+    const tightSpot: ParkingSpot = { width: 250, length: 400, kind: 'individual', entrance: 'bottom' };
+    const target = { x: 151.5, y: 198.95, angle: 0 };
+    const result = planManeuver(tightSpot, fiesta, target, [], settings);
+    const maxSteeringAngle = Math.atan(fiesta.wheelbase / (fiesta.turningDiameter! / 2)) * (180 / Math.PI);
+
+    expect(result.status).toBe('viable');
+    expect(result.entryMotion.at(-1)!.steeringAngle).toBe(0);
+    for (let index = 1; index < result.entryMotion.length; index++) {
+      const previous = result.entryMotion[index - 1]!;
+      const current = result.entryMotion[index]!;
+      if (Math.hypot(current.pose.x - previous.pose.x, current.pose.y - previous.pose.y) > 0) {
+        expect(Math.abs(current.steeringAngle - previous.steeringAngle)).toBeLessThanOrEqual(
+          maxSteeringAngle * 0.5 + 1e-7,
+        );
+      }
+    }
+    expect(result.exitMotion).toEqual([...result.entryMotion].reverse().map((frame) => ({
+      ...frame,
+      direction: frame.direction === 1 ? -1 : 1,
+    })));
+  });
+  it('pausa la reproducción al invertir el sentido sin desplazar el coche', () => {
+    const timeline = createManeuverMotionTimeline([
+      { pose: { x: 0, y: 0, angle: 0 }, direction: 1, steeringAngle: 0 },
+      { pose: { x: 100, y: 0, angle: 0 }, direction: 1, steeringAngle: 20 },
+      { pose: { x: 100, y: 0, angle: 0 }, direction: -1, steeringAngle: 20 },
+      { pose: { x: 0, y: 0, angle: 0 }, direction: -1, steeringAngle: 0 },
+    ]);
+    const pause = timeline.phases.find((phase) => phase.kind === 'pause')!;
+    const firstDrive = timeline.phases.find((phase) => phase.kind === 'drive')!;
+    const steeringSample = sampleManeuverMotion(
+      timeline,
+      (firstDrive.startMs + firstDrive.durationMs / 2) / timeline.durationMs,
+    )!;
+    const sample = sampleManeuverMotion(
+      timeline,
+      (pause.startMs + pause.durationMs / 2) / timeline.durationMs,
+    )!;
+
+    expect(pause.kind).toBe('pause');
+    expect(steeringSample.frame.steeringAngle).toBeCloseTo(10);
+    expect(sample.frame.pose).toEqual({ x: 100, y: 0, angle: 0 });
+    expect(sample.frame.direction).toBe(-1);
+    expect(timeline.distanceCm).toBe(200);
   });
   it('conserva el acceso completo y evita buscar cada estado de un pasillo largo', () => {
     const longApproach = { corridorWidth: 1000, approachLength: 3000 };

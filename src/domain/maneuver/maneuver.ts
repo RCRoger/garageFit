@@ -11,9 +11,32 @@ export interface ManeuverResult {
   entryPath: Placement[];
   /** Exact reverse of the entry route in the reversible, static-obstacle model. */
   exitPath: Placement[];
+  entryMotion: ManeuverMotionFrame[];
+  exitMotion: ManeuverMotionFrame[];
   expandedNodes: number;
   reason: string;
   turningRadius: number | null;
+}
+
+export interface ManeuverMotionFrame {
+  pose: Placement;
+  direction: -1 | 1;
+  steeringAngle: number;
+}
+
+export interface ManeuverMotionTimeline {
+  path: readonly ManeuverMotionFrame[];
+  phases: Array<
+    | { kind: 'drive'; startIndex: number; endIndex: number; startMs: number; durationMs: number; distance: number }
+    | { kind: 'pause'; index: number; startMs: number; durationMs: number }
+  >;
+  durationMs: number;
+  distanceCm: number;
+}
+
+export interface ManeuverMotionSample {
+  frame: ManeuverMotionFrame;
+  pathIndex: number;
 }
 
 export interface ManeuverSettings {
@@ -25,6 +48,8 @@ interface Node {
   pose: Placement;
   cost: number;
   parent: number;
+  direction: -1 | 1;
+  steeringIndex: number;
 }
 
 interface QueueItem {
@@ -33,8 +58,12 @@ interface QueueItem {
 }
 
 const COLLISION_STEP_CM = 10;
-const STEERING = [-1, 0, 1] as const;
-const GEARS = [-1, 1] as const;
+const STEERING_LEVELS = [-1, -0.5, 0, 0.5, 1] as const;
+const STEERING_SHIFT_PER_PRIMITIVE = 1;
+const GEAR_CHANGE_COST_CM = 60;
+const MOTION_SPEED_CM_PER_SECOND = 160;
+const DIRECTION_CHANGE_PAUSE_MS = 550;
+const MIN_DRIVE_PHASE_MS = 800;
 const SEARCH_RESOLUTIONS = [
   { stepCm: 20, positionBinCm: 20, angleBinDeg: 10, goalPositionToleranceCm: 25, goalAngleToleranceDeg: 8 },
   { stepCm: 10, positionBinCm: 5, angleBinDeg: 2, goalPositionToleranceCm: 5, goalAngleToleranceDeg: 2 },
@@ -157,46 +186,68 @@ function poseAllowed(
 
 function integrate(
   pose: Placement,
-  gear: number,
-  steering: number,
-  maxSteeringAngle: number,
+  direction: number,
+  fromSteeringAngle: number,
+  toSteeringAngle: number,
   wheelbase: number,
   distance: number,
 ): Placement[] {
   const steps = Math.max(1, Math.ceil(distance / COLLISION_STEP_CM));
-  const ds = (distance * gear) / steps;
+  const ds = (distance * direction) / steps;
   let x = pose.x;
   let y = pose.y;
   let angle = pose.angle;
   const trajectory: Placement[] = [];
   for (let step = 0; step < steps; step++) {
+    const steeringProgress = (step + 1) / steps;
+    const steeringAngle = fromSteeringAngle + (toSteeringAngle - fromSteeringAngle) * steeringProgress;
     const radians = degToRad(angle);
     x += Math.sin(radians) * ds;
     y -= Math.cos(radians) * ds;
-    const curvature = Math.tan(steering * maxSteeringAngle) / wheelbase;
+    const curvature = Math.tan(steeringAngle) / wheelbase;
     angle = normalizeAngle(angle + (curvature * ds * 180) / Math.PI);
     trajectory.push({ x, y, angle });
   }
   return trajectory;
 }
 
-function poseKey(pose: Placement, resolution: SearchResolution): string {
+function poseKey(
+  pose: Placement,
+  resolution: SearchResolution,
+  direction: -1 | 1,
+  steeringIndex: number,
+): string {
   return [
     Math.round(pose.x / resolution.positionBinCm),
     Math.round(pose.y / resolution.positionBinCm),
     Math.round(normalizeAngle(pose.angle) / resolution.angleBinDeg),
+    direction,
+    steeringIndex,
   ].join(':');
 }
 
-function heuristic(pose: Placement, target: Placement, turningRadius: number): number {
+function heuristic(
+  pose: Placement,
+  target: Placement,
+  turningRadius: number,
+  steeringIndex: number,
+  stepCm: number,
+): number {
   const distance = Math.hypot(pose.x - target.x, pose.y - target.y);
   const turning = (angleDifference(pose.angle, target.angle) * Math.PI * turningRadius) / 180;
-  return Math.max(distance, turning);
+  const steering = Math.abs(steeringIndex) * stepCm;
+  return Math.max(distance, turning, steering);
 }
 
-function reachedGoal(pose: Placement, target: Placement, resolution: SearchResolution): boolean {
+function reachedGoal(
+  pose: Placement,
+  target: Placement,
+  resolution: SearchResolution,
+  steeringIndex: number,
+): boolean {
   return Math.hypot(pose.x - target.x, pose.y - target.y) <= resolution.goalPositionToleranceCm &&
-    angleDifference(pose.angle, target.angle) <= resolution.goalAngleToleranceDeg;
+    angleDifference(pose.angle, target.angle) <= resolution.goalAngleToleranceDeg &&
+    steeringIndex === 0;
 }
 
 function startPose(spot: ParkingSpot, entrance: ParkingSpot['entrance'], approachLength: number, vehicleLength: number): Placement {
@@ -215,10 +266,10 @@ function straightSegment(
   corridorBounds: { minX: number; minY: number; maxX: number; maxY: number },
   vehicle: VehicleDimensions,
   obstacles: readonly Polygon[],
-): Placement[] | null {
+): ManeuverMotionFrame[] | null {
   const distance = Math.hypot(to.x - from.x, to.y - from.y);
   const steps = Math.max(1, Math.ceil(distance / COLLISION_STEP_CM));
-  const segment: Placement[] = [];
+  const segment: ManeuverMotionFrame[] = [];
   for (let step = 0; step <= steps; step++) {
     const progress = step / steps;
     const pose = {
@@ -227,7 +278,7 @@ function straightSegment(
       angle: from.angle,
     };
     if (!poseAllowed(pose, spot, corridorBounds, vehicle, obstacles)) return null;
-    segment.push(pose);
+    segment.push({ pose, direction: 1, steeringAngle: 0 });
   }
   return segment;
 }
@@ -241,12 +292,16 @@ function alignedForStraightTravel(from: Placement, to: Placement): boolean {
   return angleDifference(from.angle, to.angle) <= 1e-7 && along >= 0 && Math.abs(lateral) <= 1e-7;
 }
 
-function pathTo(nodes: readonly Node[], goalIndex: number): Placement[] {
-  const result: Placement[] = [];
+function pathTo(nodes: readonly Node[], goalIndex: number, maxSteeringAngle: number): ManeuverMotionFrame[] {
+  const result: ManeuverMotionFrame[] = [];
   let index = goalIndex;
   while (index >= 0) {
     const node = nodes[index]!;
-    result.push(node.pose);
+    result.push({
+      pose: node.pose,
+      direction: node.direction,
+      steeringAngle: STEERING_LEVELS[node.steeringIndex + 2]! * maxSteeringAngle,
+    });
     index = node.parent;
   }
   return result.reverse();
@@ -257,15 +312,23 @@ function result(
   reason: string,
   turningRadius: number | null,
   expandedNodes = 0,
-  entryPath: Placement[] = [],
+  entryMotion: ManeuverMotionFrame[] = [],
 ): ManeuverResult {
+  const usableMotion = status === 'viable' ? entryMotion : [];
+  const exitMotion = usableMotion.slice().reverse().map((frame) => ({
+    ...frame,
+    direction: frame.direction === 1 ? -1 as const : 1 as const,
+  }));
+  const entryPath = usableMotion.map((frame) => frame.pose);
   return {
     status,
     reason,
     turningRadius,
     expandedNodes,
     entryPath,
-    exitPath: status === 'viable' ? [...entryPath].reverse() : [],
+    exitPath: exitMotion.map((frame) => frame.pose),
+    entryMotion: usableMotion,
+    exitMotion,
   };
 }
 
@@ -280,7 +343,7 @@ export function planManeuver(
   target: Placement,
   obstacles: readonly Obstacle[],
   settings: ManeuverSettings,
-  maxExpanded = 5000,
+  maxExpanded = 100000,
 ): ManeuverResult {
   if (vehicle.turningDiameter === null || vehicle.turningDiameter === undefined) {
     return result('not-verified', 'Introduce el diámetro de giro para usar el modelo bicicleta.', null);
@@ -315,18 +378,17 @@ export function planManeuver(
     obstaclePolygons,
   );
   const start = approachPrefix ? planningStart : actualStart;
-  const prefix = approachPrefix ?? [actualStart];
+  const prefix = approachPrefix ?? [{ pose: actualStart, direction: 1 as const, steeringAngle: 0 }];
 
   if (alignedForStraightTravel(start, target)) {
     const straightPath = straightSegment(start, target, spot, corridorBounds, vehicle, obstaclePolygons);
     if (straightPath) {
-      const entryPath = [...prefix.slice(0, -1), ...straightPath];
       return result(
         'viable',
         'Se encontró una trayectoria recta libre hasta la posición final.',
         turningRadius,
         0,
-        entryPath,
+        [...prefix.slice(0, -1), ...straightPath],
       );
     }
   }
@@ -356,13 +418,18 @@ export function planManeuver(
     expandedNodes = searchResult.expandedNodes;
     if (searchResult.status === 'viable') {
       if (resolutionIndex === 0) continue;
-      const completeResult = prefix.length > 1
-        ? {
-          ...searchResult,
-          entryPath: [...prefix.slice(0, -1), ...searchResult.entryPath],
-          exitPath: [...searchResult.entryPath].reverse().concat(prefix.slice(0, -1).reverse()),
-        }
-        : searchResult;
+      const entryMotion = [...prefix.slice(0, -1), ...searchResult.entryMotion];
+      const exitMotion = entryMotion.slice().reverse().map((frame) => ({
+        ...frame,
+        direction: frame.direction === 1 ? -1 as const : 1 as const,
+      }));
+      const completeResult = {
+        ...searchResult,
+        entryMotion,
+        exitMotion,
+        entryPath: entryMotion.map((frame) => frame.pose),
+        exitPath: exitMotion.map((frame) => frame.pose),
+      };
       return resolutionIndex > 0
         ? { ...completeResult, reason: `${completeResult.reason} Se encontró al refinar la resolución de búsqueda.` }
         : completeResult;
@@ -399,26 +466,26 @@ function searchManeuver(
   maxExpanded: number,
   expandedOffset: number,
 ): ManeuverResult {
-  const nodes: Node[] = [{ pose: start, cost: 0, parent: -1 }];
+  const nodes: Node[] = [{ pose: start, cost: 0, parent: -1, direction: 1, steeringIndex: 0 }];
   const open = new MinHeap();
-  open.push({ index: 0, priority: heuristic(start, target, turningRadius) });
-  const bestCost = new Map<string, number>([[poseKey(start, resolution), 0]]);
+  open.push({ index: 0, priority: heuristic(start, target, turningRadius, 0, resolution.stepCm) });
+  const bestCost = new Map<string, number>([[poseKey(start, resolution, 1, 0), 0]]);
   const closed = new Set<string>();
   let expanded = 0;
 
   while (open.size > 0) {
     const item = open.pop()!;
     const current = nodes[item.index]!;
-    const key = poseKey(current.pose, resolution);
+    const key = poseKey(current.pose, resolution, current.direction, current.steeringIndex);
     if (closed.has(key)) continue;
-    if (reachedGoal(current.pose, target, resolution)) {
-      const entryPath = pathTo(nodes, item.index);
+    if (reachedGoal(current.pose, target, resolution, current.steeringIndex)) {
+      const entryMotion = pathTo(nodes, item.index, maxSteeringAngle);
       return result(
         'viable',
         `Se encontró una trayectoria de entrada con tolerancia final de ${resolution.goalPositionToleranceCm} cm y ${resolution.goalAngleToleranceDeg}°; la salida es su recorrido inverso.`,
         turningRadius,
         expandedOffset + expanded,
-        entryPath,
+        entryMotion,
       );
     }
     if (expanded >= maxExpanded) {
@@ -432,20 +499,60 @@ function searchManeuver(
     closed.add(key);
     expanded++;
 
-    for (const gear of GEARS) {
-      for (const steering of STEERING) {
-        const trajectory = integrate(current.pose, gear, steering, maxSteeringAngle, vehicle.wheelbase, resolution.stepCm);
-        const nextPose = trajectory[trajectory.length - 1]!;
-        if (trajectory.some((pose) => !poseAllowed(pose, spot, corridorBounds, vehicle, obstaclePolygons))) continue;
-        const nextKey = poseKey(nextPose, resolution);
-        if (closed.has(nextKey)) continue;
-        const nextCost = current.cost + resolution.stepCm * (gear < 0 ? 1.15 : 1);
-        if (nextCost >= (bestCost.get(nextKey) ?? Infinity)) continue;
-        bestCost.set(nextKey, nextCost);
-        const nextIndex = nodes.push({ pose: nextPose, cost: nextCost, parent: item.index }) - 1;
-        const nextHeuristic = heuristic(nextPose, target, turningRadius);
-        open.push({ index: nextIndex, priority: nextCost + nextHeuristic });
-      }
+    const shiftedDirection = current.direction === 1 ? -1 : 1;
+    const shiftedKey = poseKey(current.pose, resolution, shiftedDirection, current.steeringIndex);
+    const shiftCost = current.cost + GEAR_CHANGE_COST_CM;
+    if (!closed.has(shiftedKey) && shiftCost < (bestCost.get(shiftedKey) ?? Infinity)) {
+      bestCost.set(shiftedKey, shiftCost);
+      const shiftedIndex = nodes.push({
+        pose: current.pose,
+        cost: shiftCost,
+        parent: item.index,
+        direction: shiftedDirection,
+        steeringIndex: current.steeringIndex,
+      }) - 1;
+      open.push({
+        index: shiftedIndex,
+        priority: shiftCost + heuristic(
+          current.pose,
+          target,
+          turningRadius,
+          current.steeringIndex,
+          resolution.stepCm,
+        ),
+      });
+    }
+
+    const currentSteeringAngle = STEERING_LEVELS[current.steeringIndex + 2]! * maxSteeringAngle;
+    const firstSteeringIndex = Math.max(-2, current.steeringIndex - STEERING_SHIFT_PER_PRIMITIVE);
+    const lastSteeringIndex = Math.min(2, current.steeringIndex + STEERING_SHIFT_PER_PRIMITIVE);
+    for (const steeringIndex of Array.from({ length: lastSteeringIndex - firstSteeringIndex + 1 }, (_, index) =>
+      firstSteeringIndex + index)) {
+      const steeringAngle = STEERING_LEVELS[steeringIndex + 2]!;
+      const trajectory = integrate(
+        current.pose,
+        current.direction,
+        currentSteeringAngle,
+        steeringAngle * maxSteeringAngle,
+        vehicle.wheelbase,
+        resolution.stepCm,
+      );
+      const nextPose = trajectory[trajectory.length - 1]!;
+      if (trajectory.some((pose) => !poseAllowed(pose, spot, corridorBounds, vehicle, obstaclePolygons))) continue;
+      const nextKey = poseKey(nextPose, resolution, current.direction, steeringIndex);
+      if (closed.has(nextKey)) continue;
+      const nextCost = current.cost + resolution.stepCm * (current.direction < 0 ? 1.15 : 1);
+      if (nextCost >= (bestCost.get(nextKey) ?? Infinity)) continue;
+      bestCost.set(nextKey, nextCost);
+      const nextIndex = nodes.push({
+        pose: nextPose,
+        cost: nextCost,
+        parent: item.index,
+        direction: current.direction,
+        steeringIndex,
+      }) - 1;
+      const nextHeuristic = heuristic(nextPose, target, turningRadius, steeringIndex, resolution.stepCm);
+      open.push({ index: nextIndex, priority: nextCost + nextHeuristic });
     }
   }
 
@@ -482,4 +589,89 @@ export function interpolateTrajectory(path: readonly Placement[], progress: numb
     y: from.y + (to.y - from.y) * fraction,
     angle: normalizeAngle(from.angle + angleDelta * fraction),
   };
+}
+
+export function createManeuverMotionTimeline(path: readonly ManeuverMotionFrame[]): ManeuverMotionTimeline {
+  const phases: ManeuverMotionTimeline['phases'] = [];
+  let elapsedMs = 0;
+  let runStart = 0;
+  let runDistance = 0;
+
+  const addDrivePhase = (startIndex: number, endIndex: number, distance: number) => {
+    if (distance <= 0) return;
+    const durationMs = Math.max(MIN_DRIVE_PHASE_MS, (distance / MOTION_SPEED_CM_PER_SECOND) * 1000);
+    phases.push({ kind: 'drive', startIndex, endIndex, startMs: elapsedMs, durationMs, distance });
+    elapsedMs += durationMs;
+  };
+
+  for (let index = 1; index < path.length; index++) {
+    const previous = path[index - 1]!;
+    const current = path[index]!;
+    const segmentDistance = Math.hypot(
+      current.pose.x - previous.pose.x,
+      current.pose.y - previous.pose.y,
+    );
+    if (segmentDistance < 1e-7 && current.direction !== previous.direction) {
+      addDrivePhase(runStart, index - 1, runDistance);
+      phases.push({ kind: 'pause', index, startMs: elapsedMs, durationMs: DIRECTION_CHANGE_PAUSE_MS });
+      elapsedMs += DIRECTION_CHANGE_PAUSE_MS;
+      runStart = index;
+      runDistance = 0;
+      continue;
+    }
+    runDistance += segmentDistance;
+  }
+  addDrivePhase(runStart, path.length - 1, runDistance);
+
+  const totalDistance = path.slice(1).reduce((total, frame, index) =>
+    total + Math.hypot(frame.pose.x - path[index]!.pose.x, frame.pose.y - path[index]!.pose.y), 0);
+  return {
+    path,
+    phases,
+    durationMs: elapsedMs || MIN_DRIVE_PHASE_MS,
+    distanceCm: totalDistance,
+  };
+}
+
+export function sampleManeuverMotion(
+  timeline: ManeuverMotionTimeline,
+  progress: number,
+): ManeuverMotionSample | null {
+  const { path, phases } = timeline;
+  if (path.length === 0) return null;
+  const normalizedProgress = Math.max(0, Math.min(1, progress));
+  if (normalizedProgress === 0) return { frame: path[0]!, pathIndex: 0 };
+  if (normalizedProgress === 1) return { frame: path[path.length - 1]!, pathIndex: path.length - 1 };
+  const elapsedMs = normalizedProgress * timeline.durationMs;
+  const phase = phases.find((candidate) => elapsedMs <= candidate.startMs + candidate.durationMs) ?? phases.at(-1);
+  if (!phase) return { frame: path[0]!, pathIndex: 0 };
+  if (phase.kind === 'pause') return { frame: path[phase.index]!, pathIndex: phase.index };
+
+  const phaseProgress = Math.max(0, Math.min(1, (elapsedMs - phase.startMs) / phase.durationMs));
+  const easedProgress = phaseProgress * phaseProgress * (3 - 2 * phaseProgress);
+  let distanceRemaining = phase.distance * easedProgress;
+  for (let index = phase.startIndex + 1; index <= phase.endIndex; index++) {
+    const from = path[index - 1]!;
+    const to = path[index]!;
+    const segmentDistance = Math.hypot(to.pose.x - from.pose.x, to.pose.y - from.pose.y);
+    if (distanceRemaining <= segmentDistance || index === phase.endIndex) {
+      const fraction = segmentDistance === 0 ? 1 : Math.min(1, distanceRemaining / segmentDistance);
+      const angleDelta = normalizeAngle(to.pose.angle - from.pose.angle);
+      return {
+        pathIndex: index - 1,
+        frame: {
+          pose: {
+            x: from.pose.x + (to.pose.x - from.pose.x) * fraction,
+            y: from.pose.y + (to.pose.y - from.pose.y) * fraction,
+            angle: normalizeAngle(from.pose.angle + angleDelta * fraction),
+          },
+          direction: from.direction,
+          steeringAngle: from.steeringAngle + (to.steeringAngle - from.steeringAngle) * fraction,
+        },
+      };
+    }
+    distanceRemaining -= segmentDistance;
+  }
+  const lastIndex = phase.endIndex;
+  return { frame: path[lastIndex]!, pathIndex: lastIndex };
 }

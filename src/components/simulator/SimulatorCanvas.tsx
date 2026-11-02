@@ -4,7 +4,11 @@ import type Konva from 'konva';
 import { useSimulationStore } from '@/stores/simulationStore';
 import { useFitAnalysis } from '@/hooks/useFitAnalysis';
 import type { Obstacle } from '@/types/domain';
-import { approachCorridor, interpolateTrajectory } from '@/domain/maneuver/maneuver';
+import {
+  approachCorridor,
+  createManeuverMotionTimeline,
+  sampleManeuverMotion,
+} from '@/domain/maneuver/maneuver';
 import { vehicleWidthForClearance } from '@/domain/collision/analysis';
 
 const PAD = 64;
@@ -39,27 +43,15 @@ export function SimulatorCanvas() {
   } = useSimulationStore();
   const analysis = useFitAnalysis();
   const playbackPath = maneuverResult?.status === 'viable'
-    ? playbackDirection === 'entry' ? maneuverResult.entryPath : maneuverResult.exitPath
+    ? playbackDirection === 'entry' ? maneuverResult.entryMotion : maneuverResult.exitMotion
     : [];
+  const playbackTimeline = useMemo(() => createManeuverMotionTimeline(playbackPath), [playbackPath]);
   playbackProgressRef.current = playbackProgress;
-  const playbackDistance = useMemo(() => playbackPath.slice(1).reduce((distance, pose, index) =>
-    distance + Math.hypot(pose.x - playbackPath[index]!.x, pose.y - playbackPath[index]!.y), 0), [playbackPath]);
-  const playbackDuration = Math.max(1400, Math.min(12000, playbackDistance * 8));
-  const animatedPlacement = previewActive
-    ? interpolateTrajectory(playbackPath, playbackProgress) ?? placement
-    : placement;
-  let remainingPlaybackDistance = playbackProgress * playbackDistance;
-  let activePathIndex = 0;
-  while (activePathIndex < playbackPath.length - 1) {
-    const from = playbackPath[activePathIndex]!;
-    const to = playbackPath[activePathIndex + 1]!;
-    const segmentDistance = Math.hypot(to.x - from.x, to.y - from.y);
-    if (remainingPlaybackDistance <= segmentDistance) break;
-    remainingPlaybackDistance -= segmentDistance;
-    activePathIndex++;
-  }
+  const motionSample = previewActive ? sampleManeuverMotion(playbackTimeline, playbackProgress) : null;
+  const animatedPlacement = motionSample?.frame.pose ?? placement;
+  const activePathIndex = motionSample?.pathIndex ?? 0;
   const traveledPath = previewActive
-    ? [...playbackPath.slice(0, activePathIndex + 1), animatedPlacement]
+    ? [...playbackPath.slice(0, activePathIndex + 1).map((frame) => frame.pose), animatedPlacement]
     : [];
 
   useEffect(() => {
@@ -84,9 +76,10 @@ export function SimulatorCanvas() {
     let startedAt: number | undefined;
     let frame = 0;
     const startProgress = playbackProgressRef.current;
+    const remainingDuration = playbackTimeline.durationMs * (1 - startProgress);
     const animate = (now: number) => {
       startedAt ??= now;
-      const progress = Math.min(1, startProgress + (now - startedAt) / playbackDuration);
+      const progress = Math.min(1, startProgress + (now - startedAt) / remainingDuration);
       setPlaybackProgress(progress);
       if (progress >= 1) {
         setIsPlaying(false);
@@ -96,7 +89,7 @@ export function SimulatorCanvas() {
     };
     frame = window.requestAnimationFrame(animate);
     return () => window.cancelAnimationFrame(frame);
-  }, [isPlaying, playbackDuration, playbackPath.length, reducedMotion]);
+  }, [isPlaying, playbackPath.length, playbackTimeline.durationMs, reducedMotion]);
 
   useEffect(() => {
     const el = ref.current;
@@ -426,7 +419,7 @@ export function SimulatorCanvas() {
 
           {playbackPath.length > 1 && (
             <Arrow
-              points={playbackPath.flatMap((pose) => [pose.x, pose.y])}
+              points={playbackPath.flatMap((frame) => [frame.pose.x, frame.pose.y])}
               stroke={playbackDirection === 'entry' ? '#059669' : '#b7791f'}
               fill={playbackDirection === 'entry' ? '#059669' : '#b7791f'}
               strokeWidth={3 / scale}
@@ -496,14 +489,22 @@ export function SimulatorCanvas() {
             />
             {[-1, 1].map((side) => (
               <Group key={side} listening={false}>
-                <Rect
-                  x={side * carW * 0.37 - (side > 0 ? 0 : carW * 0.1)}
+                <Group
+                  x={side * carW * 0.37}
                   y={-vehicle.wheelbase * 0.38}
-                  width={carW * 0.1}
-                  height={carL * 0.12}
-                  fill="#1e293b"
-                  cornerRadius={carW * 0.04}
-                />
+                  rotation={previewActive && motionSample
+                    ? (motionSample.frame.steeringAngle * 180) / Math.PI
+                    : 0}
+                >
+                  <Rect
+                    x={-carW * 0.05}
+                    y={-carL * 0.06}
+                    width={carW * 0.1}
+                    height={carL * 0.12}
+                    fill="#1e293b"
+                    cornerRadius={carW * 0.04}
+                  />
+                </Group>
                 <Rect
                   x={side * carW * 0.37 - (side > 0 ? 0 : carW * 0.1)}
                   y={vehicle.wheelbase * 0.25}
