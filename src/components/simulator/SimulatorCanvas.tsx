@@ -5,6 +5,7 @@ import { useSimulationStore } from '@/stores/simulationStore';
 import { useFitAnalysis } from '@/hooks/useFitAnalysis';
 import type { Obstacle } from '@/types/domain';
 import { approachCorridor } from '@/domain/maneuver/maneuver';
+import { vehicleWidthForClearance } from '@/domain/collision/analysis';
 
 const PAD = 64;
 
@@ -104,6 +105,7 @@ export function SimulatorCanvas() {
   };
 
   const carW = vehicle.bodyWidth;
+  const mirrorW = vehicleWidthForClearance(vehicle);
   const carL = vehicle.length;
   const bodyShape = [
     -carW * 0.3, -carL / 2,
@@ -340,7 +342,7 @@ export function SimulatorCanvas() {
                   cornerRadius={carW * 0.04}
                 />
                 <Rect
-                  x={side < 0 ? -vehicle.widthMirrorsFolded / 2 : vehicle.widthMirrorsFolded / 2 - carW * 0.07}
+                  x={side < 0 ? -mirrorW / 2 : mirrorW / 2 - carW * 0.07}
                   y={-carL * 0.34}
                   width={carW * 0.07}
                   height={carL * 0.07}
@@ -352,7 +354,7 @@ export function SimulatorCanvas() {
             <Line points={[-carW * 0.47, 0, carW * 0.47, 0]} stroke="#64748b" strokeWidth={1 / scale} dash={[5 / scale, 4 / scale]} listening={false} />
             {showDimensions && (
               <>
-                <Text text={`${vehicle.widthMirrorsFolded} cm`} x={-vehicle.widthMirrorsFolded / 2} y={carL / 2 + 5 / scale} width={vehicle.widthMirrorsFolded} align="center" fontSize={11 / scale} fill="#334155" listening={false} />
+                <Text text={`${mirrorW} cm${vehicle.widthMirrorsFolded === null ? ' (carrocería)' : ''}`} x={-mirrorW / 2} y={carL / 2 + 5 / scale} width={mirrorW} align="center" fontSize={11 / scale} fill="#334155" listening={false} />
                 <Text text={`${vehicle.length} cm`} x={carW / 2 + 4 / scale} y={-carL / 2} fontSize={11 / scale} fill="#334155" listening={false} />
               </>
             )}

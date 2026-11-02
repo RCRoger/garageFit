@@ -14,8 +14,19 @@ const dimensions = {
 };
 
 describe('catálogo local de vehículos', () => {
-  it('no inventa modelos ni dimensiones de fábrica', () => {
-    expect(vehicleCatalog).toEqual([]);
+  it('incluye un catálogo amplio de modelos y generaciones con fuente', () => {
+    expect(vehicleCatalog.length).toBeGreaterThan(7000);
+    expect(vehicleCatalog.every((vehicle) => vehicle.sourceUrl.includes('ee99776470a45214bf524cdfe22e5dbf4bd67f93'))).toBe(true);
+    expect(vehicleCatalog.some((vehicle) => vehicle.manufacturer === 'SEAT' && vehicle.model === 'Ibiza')).toBe(true);
+    expect(vehicleCatalog.some((vehicle) => Object.values(vehicle.dimensions).every((value) => value === null))).toBe(true);
+  });
+  it('conserva las dimensiones ausentes como desconocidas', () => {
+    const vehicle = vehicleCatalog.find((item) => item.manufacturer === 'SEAT' && item.model === 'Ibiza' && item.dimensions.length !== null);
+    expect(vehicle).toBeDefined();
+    expect(vehicle?.dimensions.length).toBeGreaterThan(100);
+    expect(vehicle?.dimensions.bodyWidth).toBeGreaterThan(100);
+    expect(vehicle?.dimensions.height).toBeGreaterThan(80);
+    expect(vehicle?.dimensions.wheelbase).toBeGreaterThan(100);
   });
   it('acepta un vehículo personalizado con años desconocidos', () => {
     expect(PersonalVehicleSchema.safeParse({

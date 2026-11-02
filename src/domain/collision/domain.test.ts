@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { closestPointsBetweenPolygons, polygonContains, polygonDistance, polygonsIntersect, pointSegmentDistance } from './collision';
-import { analyzeFit, computeMargins } from './analysis';
+import { analyzeFit, computeMargins, vehicleFootprint } from './analysis';
 import { axisRect, circlePolygon, orientedRect, polygonArea } from '../geometry/polygon';
 import { doorPolygonAt } from '../doors/doorGeometry';
 import { rotate, vec } from '../geometry/vec';
@@ -135,6 +135,17 @@ describe('validación de dimensiones', () => {
     expect(VehicleDimensionsSchema.safeParse({ ...car, widthMirrorsFolded: 170 }).success).toBe(false));
   it('rechaza desplegados < plegados', () =>
     expect(VehicleDimensionsSchema.safeParse({ ...car, widthMirrorsExtended: 185 }).success).toBe(false));
+  it('rechaza espejos desplegados menores que carrocería aunque los plegados sean desconocidos', () =>
+    expect(VehicleDimensionsSchema.safeParse({
+      ...car,
+      widthMirrorsFolded: null,
+      widthMirrorsExtended: 170,
+    }).success).toBe(false));
+  it('acepta espejos desconocidos y usa carrocería como anchura de referencia', () => {
+    const parsed = VehicleDimensionsSchema.parse({ ...car, widthMirrorsFolded: null, widthMirrorsExtended: null });
+    const footprint = vehicleFootprint(parsed, { x: 100, y: 100, angle: 0 });
+    near(Math.max(...footprint.map((point) => point.x)) - Math.min(...footprint.map((point) => point.x)), car.bodyWidth);
+  });
   it('rechaza batalla ≥ longitud', () =>
     expect(VehicleDimensionsSchema.safeParse({ ...car, wheelbase: 450 }).success).toBe(false));
   it('rechaza NaN e Infinity', () => {

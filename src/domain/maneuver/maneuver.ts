@@ -1,7 +1,7 @@
 import { polygonsIntersect } from '../collision/collision';
 import { axisRect, orientedRect, type Polygon } from '../geometry/polygon';
 import { degToRad, length, sub, vec } from '../geometry/vec';
-import { obstaclePolygon } from '../collision/analysis';
+import { obstaclePolygon, vehicleWidthForClearance } from '../collision/analysis';
 import type { Obstacle, ParkingSpot, Placement, VehicleDimensions } from '@/types/domain';
 
 export type ManeuverStatus = 'viable' | 'not-viable' | 'not-verified';
@@ -115,7 +115,7 @@ function pointOnPathInsideDomain(
 }
 
 function footprint(v: VehicleDimensions, pose: Placement): Polygon {
-  return orientedRect(vec(pose.x, pose.y), v.widthMirrorsFolded, v.length, pose.angle);
+  return orientedRect(vec(pose.x, pose.y), vehicleWidthForClearance(v), v.length, pose.angle);
 }
 
 function poseAllowed(

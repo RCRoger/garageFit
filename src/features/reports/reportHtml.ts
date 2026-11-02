@@ -56,6 +56,9 @@ export function createReportHtml(data: ReportData): string {
   const warnings = [
     ...data.analysis.doorResults.filter((door) => door.estimated).map((door) => `Los parámetros de la puerta “${door.label}” son estimados.`),
     ...(data.analysis.doorStatus === 'not-configured' ? ['No hay puertas configuradas; su apertura no está verificada.'] : []),
+    ...(data.vehicle.widthMirrorsFolded === null || data.vehicle.widthMirrorsExtended === null
+      ? ['La anchura de uno o ambos espejos no está disponible; el encaje utiliza la anchura de carrocería cuando falta la medida plegada.']
+      : []),
     ...(!data.maneuver || data.maneuver.status === 'not-verified' ? ['La maniobrabilidad no está verificada.'] : []),
     ...(data.analysis.status === 'limited' ? ['El encaje presenta limitaciones; revisar márgenes, obstáculos y apertura de puertas.'] : []),
     ...(data.analysis.status === 'collision' ? ['La huella del vehículo sobresale de la plaza o colisiona con un obstáculo.'] : []),
@@ -82,7 +85,7 @@ th{width:35%;font-weight:600}.simulation{max-width:100%;max-height:70vh;object-f
 <h2>Simulación</h2>${image}
 <h2>Plaza y vehículo</h2><table>
 ${row('Plaza', `${data.spot.width} × ${data.spot.length} cm · ${data.spot.kind} · entrada ${data.spot.entrance}`)}
-${row('Vehículo', `${data.vehicle.length} cm largo · ${data.vehicle.bodyWidth} cm carrocería · espejos plegados ${data.vehicle.widthMirrorsFolded} cm · espejos desplegados ${data.vehicle.widthMirrorsExtended} cm`)}
+${row('Vehículo', `${data.vehicle.length} cm largo · ${data.vehicle.bodyWidth} cm carrocería · espejos plegados ${cm(data.vehicle.widthMirrorsFolded)} · espejos desplegados ${cm(data.vehicle.widthMirrorsExtended)}`)}
 ${row('Altura / batalla', `${data.vehicle.height} cm / ${data.vehicle.wheelbase} cm`)}
 ${row('Diámetro de giro', cm(data.vehicle.turningDiameter))}
 ${row('Posición / orientación', `(${data.placement.x.toFixed(1)}, ${data.placement.y.toFixed(1)}) cm · ${data.placement.angle.toFixed(1)}°`)}

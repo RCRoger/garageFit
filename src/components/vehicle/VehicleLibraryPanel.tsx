@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PersonalVehicleSchema, VehicleDimensionsSchema } from '@/types/domain';
-import type { PersonalVehicle, VehicleDimensions } from '@/types/domain';
+import type { CatalogVehicle, PersonalVehicle, VehicleDimensions } from '@/types/domain';
 import { filterVehicles } from '@/features/vehicles/searchVehicles';
 import { vehicleCatalog } from '@/infrastructure/vehicle-database/catalog';
 import { useSimulationStore } from '@/stores/simulationStore';
@@ -20,10 +20,12 @@ interface VehicleDraft {
 }
 
 interface ListedVehicle {
-  record: PersonalVehicle;
+  record: CatalogVehicle | PersonalVehicle;
   source: 'catálogo' | 'personalizado';
   sourceUrl?: string;
 }
+
+const MAX_VISIBLE_VEHICLES = 100;
 
 function blankDraft(dimensions: VehicleDimensions): VehicleDraft {
   return {
@@ -68,8 +70,25 @@ export function VehicleLibraryPanel() {
     manufacturer,
   ), [listed, favoritesOnly, favoriteIds, query, manufacturer]);
   const selectedCustom = customVehicles.find((item) => item.id === activeId);
+  const selectedCatalog = vehicleCatalog.find((item) => item.id === activeId);
 
-  const selectVehicle = (record: PersonalVehicle) => {
+  const selectVehicle = (record: CatalogVehicle | PersonalVehicle) => {
+    if ('sourceUrl' in record) {
+      setVehicle({
+        length: record.dimensions.length ?? currentVehicle.length,
+        bodyWidth: record.dimensions.bodyWidth ?? currentVehicle.bodyWidth,
+        height: record.dimensions.height ?? currentVehicle.height,
+        wheelbase: record.dimensions.wheelbase ?? currentVehicle.wheelbase,
+        doors: [],
+        widthMirrorsFolded: null,
+        widthMirrorsExtended: null,
+        turningDiameter: null,
+      });
+      setActiveId(record.id);
+      setFormErrors({});
+      return;
+    }
+
     const parsed = VehicleDimensionsSchema.safeParse(record.dimensions);
     if (!parsed.success) {
       setFormErrors({ dimensions: 'Las dimensiones de este vehículo no son válidas.' });
@@ -163,9 +182,15 @@ export function VehicleLibraryPanel() {
 
       {loading && <p className="text-xs text-slate-500">Cargando datos locales…</p>}
       {error && <p role="alert" className="rounded bg-red-50 p-2 text-xs text-red-700">{error}</p>}
+      {selectedCatalog && (
+        <p role="status" className="rounded bg-amber-50 p-2 text-xs text-amber-800">
+          Fuente: vehicle-makes-models. Los campos ausentes conservan el valor actual; los espejos y el giro no están en la fuente.
+          El encaje usa la anchura de carrocería mientras no indiques la medida de los espejos.
+        </p>
+      )}
 
       <div className="max-h-52 space-y-1 overflow-y-auto">
-        {visible.map((record) => {
+        {visible.slice(0, MAX_VISIBLE_VEHICLES).map((record) => {
           const item = listed.find((entry) => entry.record.id === record.id)!;
           const favorite = favoriteIds.includes(record.id);
           return (
@@ -185,7 +210,7 @@ export function VehicleLibraryPanel() {
               {item.source === 'catálogo' && item.sourceUrl && (
                 <a href={item.sourceUrl} target="_blank" rel="noreferrer" title="Fuente de dimensiones" className="text-[11px] text-blue-700">Fuente</a>
               )}
-              {item.source === 'personalizado' && (
+              {item.source === 'personalizado' && !('sourceUrl' in record) && (
                 <>
                   <button onClick={() => editDraft(record)} className="text-[11px] text-blue-700">Editar</button>
                   <button onClick={() => void removeCustomVehicle(record.id)} className="text-[11px] text-red-600">Eliminar</button>
@@ -202,6 +227,16 @@ export function VehicleLibraryPanel() {
           </p>
         )}
       </div>
+      {visible.length > MAX_VISIBLE_VEHICLES && (
+        <p className="text-[11px] text-slate-500">
+          Mostrando {MAX_VISIBLE_VEHICLES} de {visible.length} resultados; afina la búsqueda para ver otros modelos.
+        </p>
+      )}
+      {!loading && visible.length > 0 && (
+        <p className="text-[11px] text-slate-500">
+          {vehicleCatalog.length.toLocaleString()} modelos y generaciones en el catálogo mundial.
+        </p>
+      )}
 
       {selectedCustom && !draft && (
         <button onClick={() => void saveCurrentDimensions()} className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">
@@ -239,8 +274,8 @@ export function VehicleLibraryPanel() {
           <div className="grid grid-cols-2 gap-2">
             <NumberField label="Longitud" value={draft.dimensions.length} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, length: v } })} />
             <NumberField label="Anchura carrocería" value={draft.dimensions.bodyWidth} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, bodyWidth: v } })} />
-            <NumberField label="Espejos plegados" value={draft.dimensions.widthMirrorsFolded} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, widthMirrorsFolded: v } })} />
-            <NumberField label="Espejos desplegados" value={draft.dimensions.widthMirrorsExtended} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, widthMirrorsExtended: v } })} />
+            <OptionalNumberField label="Espejos plegados" value={draft.dimensions.widthMirrorsFolded} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, widthMirrorsFolded: v } })} />
+            <OptionalNumberField label="Espejos desplegados" value={draft.dimensions.widthMirrorsExtended} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, widthMirrorsExtended: v } })} />
             <NumberField label="Altura" value={draft.dimensions.height} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, height: v } })} />
             <NumberField label="Entre ejes" value={draft.dimensions.wheelbase} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, wheelbase: v } })} />
             <OptionalNumberField

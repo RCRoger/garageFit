@@ -52,19 +52,22 @@ export const VehicleDimensionsSchema = z
   .object({
     length: cm(100, 800),
     bodyWidth: cm(100, 300),
-    widthMirrorsFolded: cm(100, 320),
-    widthMirrorsExtended: cm(100, 340),
+    widthMirrorsFolded: cm(100, 320).nullable().default(null),
+    widthMirrorsExtended: cm(100, 340).nullable().default(null),
     height: cm(80, 400),
     wheelbase: cm(100, 500),
     turningDiameter: cm(300, 3000).nullable().default(null),
     doors: z.array(DoorSchema).default([]),
   })
-  .refine((v) => v.widthMirrorsFolded >= v.bodyWidth, {
+  .refine((v) => v.widthMirrorsFolded === null || v.widthMirrorsFolded >= v.bodyWidth, {
     message: 'La anchura con espejos plegados no puede ser menor que la de la carrocería.',
     path: ['widthMirrorsFolded'],
   })
-  .refine((v) => v.widthMirrorsExtended >= v.widthMirrorsFolded, {
-    message: 'La anchura con espejos desplegados no puede ser menor que con espejos plegados.',
+  .refine((v) => v.widthMirrorsExtended === null || (
+    v.widthMirrorsExtended >= v.bodyWidth &&
+    (v.widthMirrorsFolded === null || v.widthMirrorsExtended >= v.widthMirrorsFolded)
+  ), {
+    message: 'La anchura con espejos desplegados no puede ser menor que la carrocería ni que con espejos plegados.',
     path: ['widthMirrorsExtended'],
   })
   .refine((v) => v.wheelbase < v.length, {
@@ -77,7 +80,7 @@ export const VehicleDimensionsSchema = z
   });
 export type VehicleDimensions = z.infer<typeof VehicleDimensionsSchema>;
 
-export const PersonalVehicleSchema = z.object({
+const VehicleIdentitySchema = z.object({
   id: z.string().min(1),
   manufacturer: z.string().trim().min(1, 'Introduce el fabricante.'),
   model: z.string().trim().min(1, 'Introduce el modelo.'),
@@ -85,6 +88,9 @@ export const PersonalVehicleSchema = z.object({
   trim: z.string().trim(),
   yearStart: z.number().int().min(1886).max(2200).nullable(),
   yearEnd: z.number().int().min(1886).max(2200).nullable(),
+});
+
+export const PersonalVehicleSchema = VehicleIdentitySchema.extend({
   dimensions: VehicleDimensionsSchema,
 }).refine(
   (vehicle) => vehicle.yearStart === null || vehicle.yearEnd === null || vehicle.yearEnd >= vehicle.yearStart,
@@ -92,8 +98,17 @@ export const PersonalVehicleSchema = z.object({
 );
 export type PersonalVehicle = z.infer<typeof PersonalVehicleSchema>;
 
-/** Catálogo verificable; sourceUrl identifica una fuente de dimensiones consultable. */
-export const CatalogVehicleSchema = PersonalVehicleSchema.extend({
+/** Registro de catálogo; sus dimensiones parciales conservan como nulos los datos ausentes. */
+export const CatalogVehicleDimensionsSchema = z.object({
+  length: cm(100, 800).nullable(),
+  bodyWidth: cm(100, 300).nullable(),
+  height: cm(80, 400).nullable(),
+  wheelbase: cm(100, 500).nullable(),
+});
+export type CatalogVehicleDimensions = z.infer<typeof CatalogVehicleDimensionsSchema>;
+
+export const CatalogVehicleSchema = VehicleIdentitySchema.extend({
+  dimensions: CatalogVehicleDimensionsSchema,
   sourceUrl: z.string().url(),
 });
 export type CatalogVehicle = z.infer<typeof CatalogVehicleSchema>;

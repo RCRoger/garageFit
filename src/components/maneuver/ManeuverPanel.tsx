@@ -55,6 +55,9 @@ export function ManeuverPanel() {
       {vehicle.turningDiameter === null && (
         <p className="text-xs text-amber-700">Falta el diámetro de giro; se mostrará “no verificado”.</p>
       )}
+      {vehicle.widthMirrorsFolded === null && (
+        <p className="text-xs text-amber-700">Se usa la anchura de carrocería como referencia de encaje; la holgura de los espejos no está verificada.</p>
+      )}
       <button
         onClick={run}
         disabled={disabled || busy}

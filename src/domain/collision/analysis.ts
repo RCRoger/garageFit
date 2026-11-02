@@ -16,7 +16,7 @@ export interface Margins {
 }
 
 export interface FitAnalysis {
-  /** Huella del vehículo (carrocería + espejos plegados) en coordenadas de plaza. */
+  /** Huella de carrocería y espejos plegados si se conocen; si no, usa la carrocería como referencia. */
   footprint: Polygon;
   insideSpot: boolean;
   /** Distancia del vehículo a cada pared de la plaza (negativa si sobresale). */
@@ -48,8 +48,12 @@ export interface DoorResult {
 
 export const DEFAULT_COMFORT_MARGIN_CM = 30;
 
+export function vehicleWidthForClearance(vehicle: VehicleDimensions): number {
+  return vehicle.widthMirrorsFolded ?? vehicle.bodyWidth;
+}
+
 export function vehicleFootprint(v: VehicleDimensions, p: Placement): Polygon {
-  return orientedRect(vec(p.x, p.y), v.widthMirrorsFolded, v.length, p.angle);
+  return orientedRect(vec(p.x, p.y), vehicleWidthForClearance(v), v.length, p.angle);
 }
 
 export function obstaclePolygon(o: Obstacle): Polygon {

@@ -50,6 +50,22 @@ describe('informe imprimible', () => {
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(html).not.toContain('<script>alert(1)</script>');
   });
+  it('avisa cuando los espejos no están disponibles en los datos', () => {
+    const vehicleWithoutMirrorWidth = { ...vehicle, widthMirrorsFolded: null, widthMirrorsExtended: null };
+    const analysis = analyzeFit(spot, vehicleWithoutMirrorWidth, placement, []);
+    const html = createReportHtml({
+      projectName: 'Garaje',
+      spot,
+      vehicle: vehicleWithoutMirrorWidth,
+      placement,
+      obstacles: [],
+      analysis,
+      maneuver: null,
+      imageDataUrl: null,
+    });
+    expect(html).toContain('anchura de uno o ambos espejos no está disponible');
+    expect(html).toContain('espejos plegados —');
+  });
   it('acepta solo una captura PNG de datos segura', () => {
     const analysis = analyzeFit(spot, vehicle, placement, []);
     const html = createReportHtml({

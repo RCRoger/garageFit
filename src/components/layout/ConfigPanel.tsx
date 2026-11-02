@@ -149,8 +149,8 @@ export function ConfigPanel() {
         <div className="grid grid-cols-2 gap-2">
           <NumberField label="Longitud" value={vehicle.length} onChange={(v) => setVehicle({ length: v })} error={vehErr.length} />
           <NumberField label="Anchura carrocería" value={vehicle.bodyWidth} onChange={(v) => setVehicle({ bodyWidth: v })} error={vehErr.bodyWidth} />
-          <NumberField label="Espejos plegados" value={vehicle.widthMirrorsFolded} onChange={(v) => setVehicle({ widthMirrorsFolded: v })} error={vehErr.widthMirrorsFolded} />
-          <NumberField label="Espejos desplegados" value={vehicle.widthMirrorsExtended} onChange={(v) => setVehicle({ widthMirrorsExtended: v })} error={vehErr.widthMirrorsExtended} />
+          <OptionalNumberField label="Espejos plegados" value={vehicle.widthMirrorsFolded} onChange={(v) => setVehicle({ widthMirrorsFolded: v })} error={vehErr.widthMirrorsFolded} />
+          <OptionalNumberField label="Espejos desplegados" value={vehicle.widthMirrorsExtended} onChange={(v) => setVehicle({ widthMirrorsExtended: v })} error={vehErr.widthMirrorsExtended} />
           <NumberField label="Altura" value={vehicle.height} onChange={(v) => setVehicle({ height: v })} error={vehErr.height} />
           <NumberField label="Entre ejes" value={vehicle.wheelbase} onChange={(v) => setVehicle({ wheelbase: v })} error={vehErr.wheelbase} />
           <OptionalNumberField
@@ -160,7 +160,10 @@ export function ConfigPanel() {
             error={vehErr.turningDiameter}
           />
         </div>
-        <p className="text-xs text-slate-500">Valores de ejemplo editables, no corresponden a un modelo real.</p>
+        {(vehicle.widthMirrorsFolded === null || vehicle.widthMirrorsExtended === null) && (
+          <p className="text-xs text-amber-700">Anchura de espejos desconocida. Para el encaje se usa la anchura de carrocería; introduce las medidas de los espejos para comprobar el espacio real.</p>
+        )}
+        <p className="text-xs text-slate-500">Dimensiones editables; los datos que no conozcas pueden dejarse vacíos cuando el campo lo permita.</p>
       </section>
 
       <section className="space-y-2">
