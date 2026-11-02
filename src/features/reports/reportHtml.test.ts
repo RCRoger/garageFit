@@ -42,6 +42,26 @@ describe('informe imprimible', () => {
     expect(html).toContain('No configuradas; apertura no verificada');
     expect(html).toContain('No se pudo capturar la imagen');
   });
+  it('genera el informe en el idioma seleccionado', () => {
+    const analysis = analyzeFit(spot, vehicle, placement, []);
+    const html = createReportHtml({
+      projectName: 'Garage',
+      spot,
+      vehicle,
+      placement,
+      obstacles: [],
+      analysis,
+      maneuver: null,
+      maneuverClearanceCm: 10,
+      imageDataUrl: null,
+      language: 'en',
+    });
+    expect(html).toContain('<html lang="en">');
+    expect(html).toContain('<h1>Fit report · Garage</h1>');
+    expect(html).toContain('<h2>Parking space and vehicle</h2>');
+    expect(html).toContain('No doors are configured; opening is not verified.');
+    expect(html).not.toContain('Plaza y vehículo');
+  });
   it('escapa texto controlado por el usuario', () => {
     const analysis = analyzeFit(spot, vehicle, placement, []);
     const html = createReportHtml({

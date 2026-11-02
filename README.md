@@ -21,6 +21,10 @@ npm run build
 
 La aplicación está implementada con React, TypeScript, Vite, Zustand y Zod. Los datos de proyectos, vehículos personalizados y favoritos se guardan en IndexedDB en el navegador. No hay un servicio backend.
 
+## Idioma y tema
+
+La interfaz comienza en catalán y permite seleccionar catalán, inglés o castellano, incluido el idioma de los informes imprimibles. El tema claro u oscuro y el idioma seleccionado se guardan en el almacenamiento local del navegador.
+
 ## Docker
 
 Construye la imagen de producción y publica el servidor web en el puerto local 8080:

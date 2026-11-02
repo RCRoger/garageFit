@@ -7,6 +7,8 @@ import { useSimulationStore } from '@/stores/simulationStore';
 import { useVehicleLibraryStore } from '@/stores/vehicleLibraryStore';
 import { NumberField } from '@/components/layout/NumberField';
 import { OptionalNumberField } from '@/components/layout/OptionalNumberField';
+import { usePreferences } from '@/contexts/PreferencesContext';
+import { translateError } from '@/i18n';
 
 interface VehicleDraft {
   id: string;
@@ -21,7 +23,7 @@ interface VehicleDraft {
 
 interface ListedVehicle {
   record: CatalogVehicle | PersonalVehicle;
-  source: 'catálogo' | 'personalizado';
+  source: 'catalog' | 'customized';
   sourceUrl?: string;
 }
 
@@ -41,6 +43,7 @@ function blankDraft(dimensions: VehicleDimensions): VehicleDraft {
 }
 
 export function VehicleLibraryPanel() {
+  const { t, language } = usePreferences();
   const currentVehicle = useSimulationStore((state) => state.vehicle);
   const setVehicle = useSimulationStore((state) => state.setVehicle);
   const { customVehicles, favoriteIds, loading, error, load, saveCustom, deleteCustom, toggleFavorite } =
@@ -57,12 +60,12 @@ export function VehicleLibraryPanel() {
   }, [load]);
 
   const listed = useMemo<ListedVehicle[]>(() => [
-    ...vehicleCatalog.map((record) => ({ record, source: 'catálogo' as const, sourceUrl: record.sourceUrl })),
-    ...customVehicles.map((record) => ({ record, source: 'personalizado' as const })),
+    ...vehicleCatalog.map((record) => ({ record, source: 'catalog' as const, sourceUrl: record.sourceUrl })),
+    ...customVehicles.map((record) => ({ record, source: 'customized' as const })),
   ], [customVehicles]);
   const manufacturers = useMemo(
-    () => [...new Set(listed.map(({ record }) => record.manufacturer))].sort((a, b) => a.localeCompare(b)),
-    [listed],
+    () => [...new Set(listed.map(({ record }) => record.manufacturer))].sort((a, b) => a.localeCompare(b, language)),
+    [listed, language],
   );
   const visible = useMemo(() => filterVehicles(
     listed.filter(({ record }) => !favoritesOnly || favoriteIds.includes(record.id)).map((item) => item.record),
@@ -91,7 +94,7 @@ export function VehicleLibraryPanel() {
 
     const parsed = VehicleDimensionsSchema.safeParse(record.dimensions);
     if (!parsed.success) {
-      setFormErrors({ dimensions: 'Las dimensiones de este vehículo no son válidas.' });
+      setFormErrors({ dimensions: t('invalidVehicleDimensions') });
       return;
     }
     setVehicle(parsed.data);
@@ -157,35 +160,34 @@ export function VehicleLibraryPanel() {
   return (
     <section className="space-y-2 border-b border-slate-200 pb-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Biblioteca de vehículos</h2>
+        <h2 className="text-sm font-semibold">{t('vehicleLibrary')}</h2>
         <button onClick={createDraft} className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">
-          + Personalizado
+        {t('custom')}
         </button>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <input
-          aria-label="Buscar vehículos"
+          aria-label={t('searchVehicles')}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Buscar marca o modelo"
+          placeholder={t('searchMakeModel')}
           className={`${inputClass} col-span-2`}
         />
-        <select aria-label="Filtrar por fabricante" value={manufacturer} onChange={(event) => setManufacturer(event.target.value)} className={`${inputClass} col-span-2`}>
-          <option value="">Todos los fabricantes</option>
+        <select aria-label={t('filterManufacturer')} value={manufacturer} onChange={(event) => setManufacturer(event.target.value)} className={`${inputClass} col-span-2`}>
+          <option value="">{t('allManufacturers')}</option>
           {manufacturers.map((brand) => <option key={brand} value={brand}>{brand}</option>)}
         </select>
       </div>
       <label className="flex items-center gap-1 text-xs text-slate-600">
         <input type="checkbox" checked={favoritesOnly} onChange={(event) => setFavoritesOnly(event.target.checked)} />
-        Mostrar favoritos
+        {t('showFavorites')}
       </label>
 
-      {loading && <p className="text-xs text-slate-500">Cargando datos locales…</p>}
-      {error && <p role="alert" className="rounded bg-red-50 p-2 text-xs text-red-700">{error}</p>}
+      {loading && <p className="text-xs text-slate-500">{t('loadingLocalData')}</p>}
+      {error && <p role="alert" className="rounded bg-red-50 p-2 text-xs text-red-700">{translateError(language, error)}</p>}
       {selectedCatalog && (
         <p role="status" className="rounded bg-amber-50 p-2 text-xs text-amber-800">
-          Fuente: vehicle-makes-models. Los campos ausentes conservan el valor actual; los espejos y el giro no están en la fuente.
-          El encaje usa la anchura de carrocería mientras no indiques la medida de los espejos.
+          {t('catalogSourceNotice')}
         </p>
       )}
 
@@ -202,18 +204,18 @@ export function VehicleLibraryPanel() {
                 </span>
               </button>
               <button
-                aria-label={favorite ? `Quitar ${record.model} de favoritos` : `Añadir ${record.model} a favoritos`}
-                title={favorite ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+                aria-label={favorite ? t('removeFavorite', { model: record.model }) : t('addFavorite', { model: record.model })}
+                title={favorite ? t('removeFromFavorites') : t('addToFavorites')}
                 onClick={() => void toggleFavorite(record.id)}
                 className="px-1 text-amber-600"
               >{favorite ? '★' : '☆'}</button>
-              {item.source === 'catálogo' && item.sourceUrl && (
-                <a href={item.sourceUrl} target="_blank" rel="noreferrer" title="Fuente de dimensiones" className="text-[11px] text-blue-700">Fuente</a>
+              {item.source === 'catalog' && item.sourceUrl && (
+                <a href={item.sourceUrl} target="_blank" rel="noreferrer" title={t('dimensionSource')} className="text-[11px] text-blue-700">{t('source')}</a>
               )}
-              {item.source === 'personalizado' && !('sourceUrl' in record) && (
+              {item.source === 'customized' && !('sourceUrl' in record) && (
                 <>
-                  <button onClick={() => editDraft(record)} className="text-[11px] text-blue-700">Editar</button>
-                  <button onClick={() => void removeCustomVehicle(record.id)} className="text-[11px] text-red-600">Eliminar</button>
+                  <button onClick={() => editDraft(record)} className="text-[11px] text-blue-700">{t('editCustomVehicle')}</button>
+                  <button onClick={() => void removeCustomVehicle(record.id)} className="text-[11px] text-red-600">{t('remove')}</button>
                 </>
               )}
             </div>
@@ -222,82 +224,82 @@ export function VehicleLibraryPanel() {
         {!loading && visible.length === 0 && (
           <p className="rounded bg-slate-50 p-2 text-xs text-slate-500">
             {vehicleCatalog.length === 0 && customVehicles.length === 0
-              ? 'El catálogo no tiene modelos verificados todavía. Introduce las dimensiones manualmente o crea un vehículo personalizado.'
-              : 'No hay vehículos que coincidan con la búsqueda.'}
+              ? t('noVerifiedModels')
+              : t('noMatchingVehicles')}
           </p>
         )}
       </div>
       {visible.length > MAX_VISIBLE_VEHICLES && (
         <p className="text-[11px] text-slate-500">
-          Mostrando {MAX_VISIBLE_VEHICLES} de {visible.length} resultados; afina la búsqueda para ver otros modelos.
+          {t('showingVehicleCount', { visible: MAX_VISIBLE_VEHICLES, total: visible.length })}
         </p>
       )}
       {!loading && visible.length > 0 && (
         <p className="text-[11px] text-slate-500">
-          {vehicleCatalog.length.toLocaleString()} modelos y generaciones en el catálogo mundial.
+          {t('catalogCount', { count: vehicleCatalog.length.toLocaleString(language === 'ca' ? 'ca-ES' : language === 'en' ? 'en-US' : 'es-ES') })}
         </p>
       )}
 
       {selectedCustom && !draft && (
         <button onClick={() => void saveCurrentDimensions()} className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">
-          Guardar dimensiones actuales en “{selectedCustom.model}”
+          {t('saveCurrentDimensions', { model: selectedCustom.model })}
         </button>
       )}
 
       {draft && (
         <div className="space-y-2 rounded border border-blue-200 bg-blue-50/50 p-2">
-          <h3 className="text-xs font-semibold">{customVehicles.some((item) => item.id === draft.id) ? 'Editar vehículo personalizado' : 'Nuevo vehículo personalizado'}</h3>
+          <h3 className="text-xs font-semibold">{customVehicles.some((item) => item.id === draft.id) ? t('editCustomVehicle') : t('newCustomVehicle')}</h3>
           <div className="grid grid-cols-2 gap-2">
-            <label className="text-xs">Fabricante
+            <label className="text-xs">{t('manufacturer')}
               <input value={draft.manufacturer} onChange={(e) => setDraft({ ...draft, manufacturer: e.target.value })} className={inputClass} />
-              {formErrors.manufacturer && <span className="text-red-600">{formErrors.manufacturer}</span>}
+              {formErrors.manufacturer && <span className="text-red-600">{translateError(language, formErrors.manufacturer)}</span>}
             </label>
-            <label className="text-xs">Modelo
+            <label className="text-xs">{t('model')}
               <input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} className={inputClass} />
-              {formErrors.model && <span className="text-red-600">{formErrors.model}</span>}
+              {formErrors.model && <span className="text-red-600">{translateError(language, formErrors.model)}</span>}
             </label>
-            <label className="text-xs">Generación
+            <label className="text-xs">{t('generation')}
               <input value={draft.generation} onChange={(e) => setDraft({ ...draft, generation: e.target.value })} className={inputClass} />
             </label>
-            <label className="text-xs">Versión
+            <label className="text-xs">{t('trim')}
               <input value={draft.trim} onChange={(e) => setDraft({ ...draft, trim: e.target.value })} className={inputClass} />
             </label>
-            <label className="text-xs">Año inicial
+            <label className="text-xs">{t('yearStart')}
               <input type="number" value={draft.yearStart} onChange={(e) => setDraft({ ...draft, yearStart: e.target.value })} className={inputClass} />
-              {formErrors.yearStart && <span className="text-red-600">{formErrors.yearStart}</span>}
+              {formErrors.yearStart && <span className="text-red-600">{translateError(language, formErrors.yearStart)}</span>}
             </label>
-            <label className="text-xs">Año final
+            <label className="text-xs">{t('yearEnd')}
               <input type="number" value={draft.yearEnd} onChange={(e) => setDraft({ ...draft, yearEnd: e.target.value })} className={inputClass} />
-              {formErrors.yearEnd && <span className="text-red-600">{formErrors.yearEnd}</span>}
+              {formErrors.yearEnd && <span className="text-red-600">{translateError(language, formErrors.yearEnd)}</span>}
             </label>
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <NumberField label="Longitud" value={draft.dimensions.length} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, length: v } })} />
-            <NumberField label="Anchura carrocería" value={draft.dimensions.bodyWidth} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, bodyWidth: v } })} />
-            <OptionalNumberField label="Espejos plegados" value={draft.dimensions.widthMirrorsFolded} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, widthMirrorsFolded: v } })} />
-            <OptionalNumberField label="Espejos desplegados" value={draft.dimensions.widthMirrorsExtended} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, widthMirrorsExtended: v } })} />
-            <NumberField label="Altura" value={draft.dimensions.height} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, height: v } })} />
-            <NumberField label="Entre ejes" value={draft.dimensions.wheelbase} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, wheelbase: v } })} />
+            <NumberField label={t('length')} value={draft.dimensions.length} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, length: v } })} />
+            <NumberField label={t('bodyWidth')} value={draft.dimensions.bodyWidth} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, bodyWidth: v } })} />
+            <OptionalNumberField label={t('foldedMirrors')} value={draft.dimensions.widthMirrorsFolded} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, widthMirrorsFolded: v } })} />
+            <OptionalNumberField label={t('extendedMirrors')} value={draft.dimensions.widthMirrorsExtended} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, widthMirrorsExtended: v } })} />
+            <NumberField label={t('height')} value={draft.dimensions.height} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, height: v } })} />
+            <NumberField label={t('wheelbase')} value={draft.dimensions.wheelbase} onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, wheelbase: v } })} />
             <OptionalNumberField
-              label="Diámetro de giro (si se conoce)"
+              label={t('turningDiameter')}
               value={draft.dimensions.turningDiameter}
               onChange={(v) => setDraft({ ...draft, dimensions: { ...draft.dimensions, turningDiameter: v } })}
             />
           </div>
-          {formErrors.dimensions && <p className="text-xs text-red-600">{formErrors.dimensions}</p>}
+          {formErrors.dimensions && <p className="text-xs text-red-600">{translateError(language, formErrors.dimensions)}</p>}
           {!VehicleDimensionsSchema.safeParse(draft.dimensions).success && (
-            <p className="text-xs text-amber-700">Revisa las dimensiones y la relación entre espejos y carrocería.</p>
+            <p className="text-xs text-amber-700">{t('checkVehicleDimensions')}</p>
           )}
-          <p className="text-[11px] text-slate-500">Las dimensiones se guardan como datos introducidos por el usuario, no como datos verificados de fábrica.</p>
+          <p className="text-[11px] text-slate-500">{t('userEnteredDimensions')}</p>
           <div className="flex gap-2">
-            <button onClick={() => void saveDraft()} className="rounded bg-blue-700 px-2 py-1 text-xs text-white hover:bg-blue-800">Guardar</button>
-            <button onClick={() => { setDraft(null); setFormErrors({}); }} className="rounded border border-slate-300 px-2 py-1 text-xs">Cancelar</button>
+            <button onClick={() => void saveDraft()} className="rounded bg-blue-700 px-2 py-1 text-xs text-white hover:bg-blue-800">{t('save')}</button>
+            <button onClick={() => { setDraft(null); setFormErrors({}); }} className="rounded border border-slate-300 px-2 py-1 text-xs">{t('cancel')}</button>
           </div>
         </div>
       )}
       {vehicleCatalog.length > 0 && (
         <p className="text-[11px] text-slate-500">
-          Las dimensiones del catálogo local incluyen una fuente verificable.
+          {t('localCatalogSource')}
         </p>
       )}
     </section>
